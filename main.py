@@ -18,35 +18,48 @@ class Main:
             23, 20, 24, 20, 38, 42, 19, 19, 21, 24, 23, 41, 23, 16, 23, 20, 21, 24
         ]
 
+        self.filterlist = " ()."
+
 
     def learn(self):
-        unit_start = int(input("unit start: "))
-        unit_end = int(input("unit end: "))
-        print()
+        unit_start = input("unit start: ")
 
-        self.index_range = (sum(self.unit_lengths[0:unit_start-1]), sum(self.unit_lengths[0:unit_end]))
+        if unit_start == "alle":
+            self.index_range = (0, len(self.latin))
+
+        else:
+            unit_end = input("unit end: ")
+            self.index_range = (sum(self.unit_lengths[0:int(unit_start)-1]), sum(self.unit_lengths[0:int(unit_end)]))
+        print()
 
         # init new queue
         queue = self.add_queue([])
 
+        count = 1
+
         # repeat until exit is typed
         while True:
+
 
             # select index from top of queue
             index = queue[-1]
 
             # get user input
-            response = input(self.latin[index]).lower().replace(" ", "")
+            print("[",count,"]")
+            response = self.filter(input(self.latin[index]))
+            answer = self.filter(self.german[index])
 
             if response == "exit":
                 print()
                 return 0
-            elif response in self.german[index].lower().replace(" ", ""):
-                print("richtig \n")
+            elif response in answer and len(response) > 1:
+                print("richtig: ", self.german[index])
                 queue = self.add_queue(queue, True)
             else:
                 print("falsch:", self.german[index])
                 queue = self.add_queue(queue, False)
+            
+            count += 1
 
     def add_queue(self, queue, correct=False):
         if queue == []:
@@ -61,6 +74,11 @@ class Main:
             word = queue.pop()
             queue.insert(0, word)
         return queue
+    
+    def filter(self, word):
+        for c in self.filterlist:
+            word = word.replace(c, "")
+        return word.lower()
     
 
 # run main
