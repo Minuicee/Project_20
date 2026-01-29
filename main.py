@@ -3,20 +3,20 @@ import random
 
 class Main:
 
-    def __init__(self):
+    def __init__(self, folder):
         
-        # init latin from data
-        with open("latin.csv", "r") as f:
-            self.latin = [line for line in f]
+        # init target language
+        with open(f"{folder}/target.csv", "r") as f:
+            self.target = [line for line in f]
         
-        # init coresponding german translation from data
-        with open("german.csv", "r") as f:
-            self.german = [line for line in f]
+        # init coresponding source language translation from data
+        with open(f"{folder}/source.csv", "r") as f:
+            self.source = [line for line in f]
 
-        self.unit_lengths = [
-            32, 29, 27, 28, 31, 27, 28, 22, 51, 27, 22, 50, 28, 27, 29, 28,
-            23, 20, 24, 20, 38, 42, 19, 19, 21, 24, 23, 41, 23, 16, 23, 20, 21, 24
-        ]
+        # get info from info csv
+        with open(f"{folder}/info.csv") as f:
+            line = f.readline().strip().split(",")
+            self.unit_lengths = [int(x) for x in line]
 
         self.filterlist = " ()."
 
@@ -25,7 +25,7 @@ class Main:
         unit_start = input("unit start: ")
 
         if unit_start == "alle":
-            self.index_range = (0, len(self.latin))
+            self.index_range = (0, len(self.target))
 
         else:
             unit_end = input("unit end: ")
@@ -46,17 +46,17 @@ class Main:
 
             # get user input
             print("[",count,"]")
-            response = self.filter(input(self.latin[index]))
-            answer = self.filter(self.german[index])
+            response = self.filter(input(self.target[index]))
+            answer = self.filter(self.source[index])
 
             if response == "exit":
                 print()
                 return 0
             elif response in answer and len(response) > 1:
-                print("richtig: ", self.german[index])
+                print("richtig: ", self.source[index])
                 queue = self.add_queue(queue, True)
             else:
-                print("falsch:", self.german[index])
+                print("falsch:", self.source[index])
                 queue = self.add_queue(queue, False)
             
             count += 1
@@ -80,7 +80,9 @@ class Main:
             word = word.replace(c, "")
         return word.lower()
     
+    #!gausche glocke
+    #!appl
 
 # run main
-application = Main()
+application = Main("german-latin")
 application.learn()
