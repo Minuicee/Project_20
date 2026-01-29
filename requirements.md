@@ -1,0 +1,3 @@
+pytorch
+pygame
+matplotlib
