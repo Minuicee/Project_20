@@ -1,26 +1,31 @@
-import matplotlib.pyplot as plt
-import torch.nn as nn
-import torch
+#external libraries
 import pandas as pd
-import time
 import pygame
+
+#standard libraries
+import time
+import random
 import math
 import sys
 
 
 # parameters for dev
     #gui
-window_scale = 100
+window_scale = 200
+button_scale = 2.5 #divides through button scale
 width_ratio = 6
 height_ratio = 2
-font_word_ratio = 0.6
-font_input_ratio = 0.4
+font_word_ratio = 0.4
+font_input_ratio = 0.3
+button_font_ration = 0.4
+border_radius_ratio = 0.06
     #logic
 folder = "test"
+should_save = True
+word_cap = 3 # 0 means no cap. cant be bigger than n_words.
 n_features = 7
-word_cap = 300
-len_timer = 30
-max_inactive_ticks = 300
+len_timer = 30 
+max_inactive_ticks = 300 #30ticks/second
     #ai parameters
 ema_alpha = 0.3
 typing_start_alpha = 4
@@ -29,7 +34,7 @@ time_normalization = 491700 #hours
     #gauss distribution
 sigma_factor = 1
 min_gauss_weights = 0.2
-focused_area = 300
+focused_area = 3 # cant be bigger than word_cap and n_words
     #others
 ignore_characters = "'()/,?!\"\n."
 feature_columns = [
@@ -42,18 +47,35 @@ feature_columns = [
     "correct_streak"
 ]
 
-#init files
+#init vocab and translation
 try:
-    # init target language
-    with open(f"sets/{folder}/target.csv", "r") as f:
-        target = [line.strip().lower() for line in f]
-            
-    # init coresponding source language translation from data
+
+    # init source language 
     with open(f"sets/{folder}/source.csv", "r") as f:
         source = [line.strip().lower() for line in f]
         n_words = len(source)
+
+        #making sure parameters are in range
+        if word_cap > 0 and word_cap > n_words:
+            print("Error: word_cap größer als Anzahl Wörter!")
+            sys.exit()
+
+        if focused_area > n_words or (word_cap > 0 and focused_area > word_cap):
+            print("Error: focused_area größer als Anzahl Wörter oder word_cap!")
+            sys.exit()
+        
+        if word_cap:
+            source = source[:word_cap]
+            n_words = len(source)
+    # init corresponding target language for source data
+    with open(f"sets/{folder}/target.csv", "r") as f:
+        target = [line.strip().lower() for line in f]
+        if word_cap:
+            target = target[:word_cap]
+
 except Exception as e:
     print(e)
+
 
 class SRS:
 
@@ -71,12 +93,14 @@ class SRS:
         self.input_text = ""
         self.inactive_ticks = 0
 
+        self.settings_clicked = False
+
         # if something is wrong with vocab data return with error
         if not len(source) == len(target):
             return 1
 
         # init ai model
-        self.model = word_based_AI(n_words=len(source))
+        self.model = word_based_AI()
 
         self.init_gui(width_ratio * window_scale, height_ratio * window_scale)
         self.get_new_index()
@@ -85,25 +109,36 @@ class SRS:
         # Window
         self.WIDTH = width
         self.HEIGHT = height
-        self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
-        pygame.display.set_caption("SRS")
 
         # Fonts
-        self.font_word = pygame.font.SysFont(None, int(font_word_ratio*window_scale))
-        self.font_input = pygame.font.SysFont(None, int(font_input_ratio*window_scale))
+        self.font_word = pygame.font.SysFont("Arial", int(font_word_ratio*window_scale))
+        self.font_input = pygame.font.SysFont("Arial", int(font_input_ratio*window_scale))
+        self.button_font = pygame.font.SysFont("DejaVu Sans", int(button_font_ration*window_scale))
+
+        # Buttons
+        self.settings_button = pygame.Rect(0.05*window_scale,0.05*window_scale,self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
 
         # colours
-        self.DARK = (13, 14, 41)
-        self.LIGHT = (203, 204, 247)
-        self.BLUE = (87, 207, 201)
-        self.GREEN = (44, 212, 44)
-        self.RED = (212, 44, 44)
+        self.DARK = "#0D0E29"
+        self.LIGHT = "#CBCCF7"
+        self.BLUE = "#57CFC9"
+        self.GREEN = "#2CD42C"
+        self.RED = "#D42C2C"
         self.BACKGROUND = self.DARK
-        self.FOREGROUND = self.LIGHT
+        self.TEXT = self.LIGHT
+        self.BUTTON_NORMAL = "#A67FEF"      # normal
+        self.BUTTON_HOVER = "#C2A6FF"       # hover
+        self.BUTTON_CLICKED = "#7A4CE6"     # clicked
+        self.BUTTON_CLICKED_HOVER = "#9460F0"  # clicked + hover
+        self.BUTTON_TEXT = "#130C1D"
+
 
         self.clock = pygame.time.Clock()
 
     def run(self):
+        self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
+        pygame.display.set_caption("SRS")
+
         while True:
             self.screen.fill(self.BACKGROUND)
             self.handle_events()
@@ -113,6 +148,10 @@ class SRS:
     
     def handle_events(self):
         found_keydown = False
+
+        mouse_pos = pygame.mouse.get_pos()
+        self.settings_button_hover = self.settings_button.collidepoint(mouse_pos)
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -135,6 +174,13 @@ class SRS:
                             self.typing_start = time.time()
                             self.check_typing_start = False
                         self.input_text += event.unicode
+            elif event.type == pygame.MOUSEBUTTONDOWN and self.settings_button_hover:
+                if self.settings_clicked:
+                    self.settings_clicked = False
+                else:
+                    self.settings_clicked = True
+
+
         if not found_keydown:
             self.inactive_ticks += 1
         if self.inactive_ticks > max_inactive_ticks:
@@ -147,10 +193,10 @@ class SRS:
 
         if correct:
             self.save_data(correct=True)
-            self.FOREGROUND = self.GREEN
+            self.TEXT = self.GREEN
         else:
             self.save_data(correct=False)
-            self.FOREGROUND = self.RED
+            self.TEXT = self.RED
 
         self.timer_running = True
         self.ticks = len_timer
@@ -159,8 +205,8 @@ class SRS:
     def save_data(self, correct):
 
         # save new language data
-        word_data = self.model.df_tensor[self.current_index] # currently saved data
-        old_ema = word_data[4].clone()
+        word_data = self.model.df[self.current_index] # currently saved data
+        old_ema = word_data[4]
         new_ema = self.get_ema(old_ema=word_data[4], accuracy=correct)
 
         word_data[0] += 1 # occurrences in session (will be reset on new session)
@@ -171,17 +217,19 @@ class SRS:
         word_data[5] = round(self.account_typing_start_time(correct, (self.typing_start - self.new_index_time)), 4) # last correct 
         word_data[6] = word_data[6]+1 if correct else 0 # correct streak
 
-        self.model.df_tensor[self.current_index] = word_data
-        pd.DataFrame(self.model.df_tensor.numpy()).to_csv(f"sets/{folder}/language_data.csv", mode="w", index=False, header=feature_columns)
+        if should_save:
+            # save language data
+            self.model.df[self.current_index] = word_data
+            pd.DataFrame(self.model.df).to_csv(f"sets/{folder}/language_data.csv", mode="w", index=False, header=feature_columns)
 
-        # save data points
-        pd.DataFrame(word_data.unsqueeze(0).numpy()).to_csv(f"sets/{folder}/feature_data.csv", mode="a", index=False, header=False)
-        pd.DataFrame([[ (new_ema - old_ema).item() ]]).to_csv(f"sets/{folder}/reward_data.csv", mode="a", index=False, header=False)
+            # save data points
+            pd.DataFrame([word_data]).to_csv(f"sets/{folder}/feature_data.csv", mode="a", index=False, header=False)
+            pd.DataFrame([new_ema - old_ema]).to_csv(f"sets/{folder}/reward_data.csv", mode="a", index=False, header=False)
 
-        self.print_data_tensor(word_data)
+        self.print_data_tensor(word_data) #*
 
     def account_typing_start_time(self, correct, typing_start_time):
-        return math.exp(torch.tensor(-typing_start_time / typing_start_alpha)) * (1-typing_start_beta) + typing_start_beta if correct else 0.0
+        return math.exp(-typing_start_time / typing_start_alpha) * (1-typing_start_beta) + typing_start_beta if correct else 0.0
 
     def get_ema(self, old_ema, accuracy):
         return ema_alpha*accuracy + (1-ema_alpha)*old_ema
@@ -197,7 +245,7 @@ class SRS:
         print(f"input length ({input_len}) is bigger than or equal min input length ({min_input_len}): {input_len >= min_input_len}")
 
     def get_new_index(self):
-        self.current_index = torch.randint(0, len(source), (1,))[0]
+        self.current_index = random.randint(0, len(source)-1)
         self.new_index_time = time.time()
         self.check_typing_start = True
 
@@ -205,7 +253,7 @@ class SRS:
         if self.timer_running:
             if self.ticks == 0:
                 self.timer_running = False
-                self.FOREGROUND = self.LIGHT
+                self.TEXT = self.LIGHT
                 self.input_text = ""
                 self.get_new_index()
             else:
@@ -217,30 +265,41 @@ class SRS:
             display_word = "Press any key to proceed.."
         else:
             display_word = source[self.current_index]
-        word_surface = self.font_word.render(display_word, True, self.FOREGROUND)
+        word_surface = self.font_word.render(display_word, True, self.TEXT)
         word_rect = word_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 4))
         self.screen.blit(word_surface, word_rect)
 
         # text area 
-        input_surface = self.font_input.render(self.input_text, True, self.FOREGROUND)
+        input_surface = self.font_input.render(self.input_text, True, self.TEXT)
         input_rect = input_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT * 3 // 4))
         self.screen.blit(input_surface, input_rect)
+
+        # open settings
+        self.draw_button(self.settings_button, "≡", self.settings_button_hover, self.settings_clicked)
+
+    def draw_button(self, rect, text, hover, pressed):
+        if pressed:
+            color = self.BUTTON_CLICKED_HOVER if hover else self.BUTTON_CLICKED
+        else:
+            color = self.BUTTON_HOVER if hover else self.BUTTON_NORMAL
+        pygame.draw.rect(self.screen, color, rect, border_radius=int(border_radius_ratio*window_scale))
+        label = self.button_font.render(text, True, self.BUTTON_TEXT)
+        self.screen.blit(label, label.get_rect(center=rect.center))
 
     def is_correct(self):
         # if the written words come up in the target assume it is a right answer
         input = self.filter(self.input_text)
-        target = self.filter(target[self.current_index])
-        min_input_len = math.ceil(math.sqrt(sum([len(word) for word in target])))
+        target_word = self.filter(target[self.current_index])
+        min_input_len = math.ceil(math.sqrt(sum([len(word) for word in target_word])))
         input_len = sum([len(word) for word in input])
 
-        self.print_validation_reason(input, target, min_input_len, input_len)
+        self.print_validation_reason(input, target_word, min_input_len, input_len) #*
 
         if input == "idk":
             return False
         
-        return True if all(word in target for word in input) and min_input_len <= input_len else False
+        return True if all(word in target_word for word in input) and min_input_len <= input_len else False
     
-        
     def filter(self, word):
         for c in ignore_characters:
             word = word.replace(c, "")
@@ -250,45 +309,57 @@ class SRS:
 
 class word_based_AI:
 
-    def __init__(self, n_words):
-        self.n_words = n_words
-
+    def __init__(self):
         # init collected data
         try:
             self.init_df_tensor()
-            if not self.n_words == self.df_tensor.shape[0]:
-                tensor = torch.zeros([self.n_words - self.df_tensor.shape[0], n_features])
-                tensor[:, 4] = 0.5 # bias ema value to 0.5
-                pd.DataFrame(tensor.numpy()).to_csv(f"sets/{folder}/language_data.csv", mode="a", index=False, header=False)
+            if n_words != len(self.df):
+                # file doesnt have enough rows ( in case vocab was added later on )
+                rows = [[0.0]*n_features for _ in range(n_words - len(self.df))]
+                # asign start bias to ema
+                rows = self.set_row_val(rows, 4, 0.5)
+                pd.DataFrame(rows).to_csv(f"sets/{folder}/language_data.csv", mode="a", index=False, header=False)
                 self.init_df_tensor()
 
         except Exception as _:
-            tensor = torch.zeros([self.n_words, n_features])
-            tensor[:, 4] = 0.5 # bias ema value to 0.5
-            pd.DataFrame(tensor.numpy()).to_csv(f"sets/{folder}/language_data.csv", mode="a", index=False, header=feature_columns)
+            # file doesnt exist
+            rows = [[0.0]*n_features for _ in range(n_words)]
+            # asign start bias to ema
+            rows = self.set_row_val(rows, 4, 0.5)
+            pd.DataFrame(rows).to_csv(f"sets/{folder}/language_data.csv", mode="a", index=False, header=feature_columns)
             self.init_df_tensor()
+
 
     def init_df_tensor(self):
         df = pd.read_csv(f"sets/{folder}/language_data.csv", header=0)
-        self.df_tensor = torch.tensor(df.values, dtype=torch.float32)
-        # reset occurrences in session
-        self.df_tensor[:, 0] = 0.0
+        # reset occurrences in session and save as self.df
+        self.df = self.set_row_val(df.values.tolist(), 0, 0.0)
+        
+
+    def set_row_val(self, df, col, val):
+        for row in df:
+            row[col] = val
+        return df
 
     def get_word(self):
 
-        distribution_weights = torch.Tensor(self.gauss_distribution())
-
+        distribution_weights = self.gauss_distribution()
 
     def gauss_distribution(self):
         # get a gauss distribution across the units that will be weight for the ai
-        indices = torch.arange(self.n_words, dtype=torch.float32)
-        upper_distance = self.n_words - 1 - focused_area
+        upper_distance = n_words - 1 - focused_area
         # the parameter sigma is calculated based upon the distance to the first or last unit with respect to the chosen factor
         sigma = (max(focused_area, upper_distance) / 3) * sigma_factor
-        return torch.exp(-0.5*((indices - focused_area)/sigma)**2) * (1 - min_gauss_weights) + min_gauss_weights
+
+        weights = []
+        for i in range(n_words):
+            val = math.exp(-0.5*((i - focused_area)/sigma)**2) * (1 - min_gauss_weights) + min_gauss_weights
+            weights.append(val)
+        return weights
 
 # run main
 if __name__ == "__main__":
     application = SRS()
+    application.model.get_word()
     application.run()
     
