@@ -19,10 +19,12 @@ font_word_ratio = 0.4
 font_input_ratio = 0.3
 button_font_ration = 0.4
 border_radius_ratio = 0.06
+gaussian_font_ratio = 0.1
+axis_padding_ratio = 0.1
     #logic
-folder = "test"
+folder = "spanish-german"
 should_save = True
-word_cap = 3 # 0 means no cap. cant be bigger than n_words.
+word_cap = 0 # 0 means no cap. cant be bigger than n_words.
 n_features = 7
 len_timer = 30 
 max_inactive_ticks = 300 #30ticks/second
@@ -31,10 +33,16 @@ ema_alpha = 0.3
 typing_start_alpha = 4
 typing_start_beta = 0.5
 time_normalization = 491700 #hours
-    #gauss distribution
+    #standard gauss distribution parameters
 sigma_factor = 1
+sigma_factor_min = 0.01
+sigma_factor_range = 4.9
 min_gauss_weights = 0.2
-focused_area = 3 # cant be bigger than word_cap and n_words
+min_gauss_weights_min = 0
+min_gauss_weights_range = 0.9
+focused_area = 0 # cant be bigger than word_cap and n_words
+y_labels = 5
+x_labels = 20
     #others
 ignore_characters = "'()/,?!\"\n."
 feature_columns = [
@@ -94,6 +102,7 @@ class SRS:
         self.inactive_ticks = 0
 
         self.settings_clicked = False
+        self.get_new_gaussian = False
 
         # if something is wrong with vocab data return with error
         if not len(source) == len(target):
@@ -114,9 +123,11 @@ class SRS:
         self.font_word = pygame.font.SysFont("Arial", int(font_word_ratio*window_scale))
         self.font_input = pygame.font.SysFont("Arial", int(font_input_ratio*window_scale))
         self.button_font = pygame.font.SysFont("DejaVu Sans", int(button_font_ration*window_scale))
+        self.gaussian_font = pygame.font.SysFont("Arial", int(gaussian_font_ratio*window_scale))
 
         # Buttons
         self.settings_button = pygame.Rect(0.05*window_scale,0.05*window_scale,self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.coordinate_system_rect = pygame.Rect(self.WIDTH // 7, self.HEIGHT // 10, self.WIDTH * 7 // 10, self.HEIGHT * 7 // 10)
 
         # colours
         self.DARK = "#0D0E29"
@@ -131,7 +142,10 @@ class SRS:
         self.BUTTON_CLICKED = "#7A4CE6"     # clicked
         self.BUTTON_CLICKED_HOVER = "#9460F0"  # clicked + hover
         self.BUTTON_TEXT = "#130C1D"
+        self.COORDINATE_SYSTEM = "#1D3873"
+        self.COORDINATE_SYSTEM_GRAPH = "#0DE5F0"
 
+        self.coordinate_system_line_thickness = 5
 
         self.clock = pygame.time.Clock()
 
@@ -151,18 +165,21 @@ class SRS:
 
         mouse_pos = pygame.mouse.get_pos()
         self.settings_button_hover = self.settings_button.collidepoint(mouse_pos)
+        self.coordinate_system_hover = mouse_pos if self.coordinate_system_rect.collidepoint(mouse_pos) else None
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
-            elif event.type == pygame.KEYDOWN and not self.timer_running:
+            elif event.type == pygame.KEYDOWN and not self.timer_running and not self.settings_clicked:
                 found_keydown = True
                 self.inactive_ticks = 0
+
                 if self.pause_triggered:
                     self.pause_triggered = False
                     self.new_index_time = time.time()
                     self.check_typing_start = True
+
                 else:
                     if event.key == pygame.K_RETURN:
                         if self.input_text != "": #add a second if statement since we want it to do nothing if return is pressed but text is empty
@@ -179,12 +196,18 @@ class SRS:
                     self.settings_clicked = False
                 else:
                     self.settings_clicked = True
+                    self.get_new_gaussian = True
+                    self.trigger_pause()
 
 
         if not found_keydown:
             self.inactive_ticks += 1
         if self.inactive_ticks > max_inactive_ticks:
-            self.pause_triggered = True
+            self.trigger_pause()
+
+    def trigger_pause(self):
+        self.input_text = ""
+        self.pause_triggered = True
 
     def check_input(self):
         correct = self.is_correct()
@@ -250,32 +273,113 @@ class SRS:
         self.check_typing_start = True
 
     def draw(self):
-        if self.timer_running:
-            if self.ticks == 0:
-                self.timer_running = False
-                self.TEXT = self.LIGHT
-                self.input_text = ""
-                self.get_new_index()
+        if not self.settings_clicked:
+            if self.timer_running:
+                if self.ticks == 0:
+                    self.timer_running = False
+                    self.TEXT = self.LIGHT
+                    self.input_text = ""
+                    self.get_new_index()
+                else:
+                    self.ticks -= 1
+                    self.input_text = target[self.current_index]
+                
+            # source word
+            if self.pause_triggered:
+                display_word = "Press any key to proceed.."
             else:
-                self.ticks -= 1
-                self.input_text = target[self.current_index]
-            
-        # source word
-        if self.pause_triggered:
-            display_word = "Press any key to proceed.."
-        else:
-            display_word = source[self.current_index]
-        word_surface = self.font_word.render(display_word, True, self.TEXT)
-        word_rect = word_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 4))
-        self.screen.blit(word_surface, word_rect)
+                display_word = source[self.current_index]
+            word_surface = self.font_word.render(display_word, True, self.TEXT)
+            word_rect = word_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 4))
+            self.screen.blit(word_surface, word_rect)
 
-        # text area 
-        input_surface = self.font_input.render(self.input_text, True, self.TEXT)
-        input_rect = input_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT * 3 // 4))
-        self.screen.blit(input_surface, input_rect)
+            # text area 
+            input_surface = self.font_input.render(self.input_text, True, self.TEXT)
+            input_rect = input_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT * 3 // 4))
+            self.screen.blit(input_surface, input_rect)
+            
+        else:
+            #settings for gaussian distribution
+            pygame.draw.rect(self.screen, self.COORDINATE_SYSTEM, self.coordinate_system_rect, self.coordinate_system_line_thickness, 0)
+            if self.coordinate_system_hover:
+
+                x, y = self.coordinate_system_hover
+                # rect coordinates
+                rect_left = self.coordinate_system_rect.left
+                rect_right = self.coordinate_system_rect.right
+                rect_up = self.coordinate_system_rect.top
+                rect_down = self.coordinate_system_rect.bottom
+
+                if rect_left < x < rect_right and rect_up < y < rect_down:
+
+                    focused_area_local = int(((x - rect_left) / (rect_right - rect_left)) * n_words)
+                    sigma_factor_local = sigma_factor_min + ((rect_down - y) / (rect_down - rect_up)) * sigma_factor_range
+  
+                    upper_distance = n_words - 1 - focused_area_local
+                    sigma = (max(focused_area_local, upper_distance) / 3) * sigma_factor_local
+                    # draw curve based on selected values
+                    self.draw_gaussian_curve(self.screen, self.coordinate_system_rect, focused_area_local, sigma, 0)
+
+                    if self.get_new_gaussian:
+                        global focused_area
+                        global sigma_factor
+                        focused_area = focused_area_local
+                        sigma_factor = sigma_factor_local
+            
+            axis_padding = axis_padding_ratio * window_scale
+
+            # label y axis
+            for i in range(y_labels):
+                ratio = i / (y_labels - 1)
+                label_y = self.coordinate_system_rect.bottom - ratio * (self.coordinate_system_rect.height - 2*axis_padding) - axis_padding
+                label_surf = self.gaussian_font.render(f"{ratio:.2f}", True, self.COORDINATE_SYSTEM)
+                label_rect = label_surf.get_rect(right=self.coordinate_system_rect.left - 5, centery=label_y)
+                self.screen.blit(label_surf, label_rect)
+
+            # label x axis
+            for i in range(x_labels):
+                ratio = i / (x_labels - 1)
+                label_val = int(ratio * n_words) 
+                label_x = self.coordinate_system_rect.left + ratio * (self.coordinate_system_rect.width - 2*axis_padding) + axis_padding
+                label_surf = self.gaussian_font.render(f"{label_val}", True, self.COORDINATE_SYSTEM)
+                label_rect = label_surf.get_rect(centerx=label_x, top=self.coordinate_system_rect.bottom + 5)
+                self.screen.blit(label_surf, label_rect)
+
+
 
         # open settings
         self.draw_button(self.settings_button, "≡", self.settings_button_hover, self.settings_clicked)
+    
+
+    def draw_gaussian_curve(self, surface, rect, focused_area, sigma, min_gauss_weights):
+        sigma = max(1e-6, sigma)
+
+        weights = []
+        for i in range(n_words):
+            val = math.exp(-0.5 * ((i - focused_area) / sigma) ** 2)
+            val = val * (1 - min_gauss_weights) + min_gauss_weights
+            weights.append(val)
+
+        padding = self.coordinate_system_line_thickness
+
+        inner_left = rect.left + padding
+        inner_right = rect.right - padding
+        inner_top = rect.top + padding
+        inner_bottom = rect.bottom - padding
+
+        inner_width = inner_right - inner_left
+        inner_height = inner_bottom - inner_top
+
+        points = []
+        for i, w in enumerate(weights):
+            px = inner_left + (i / (n_words - 1)) * inner_width
+            py = inner_bottom - w * inner_height
+            points.append((px, py))
+
+        if len(points) > 1:
+            pygame.draw.lines(surface, self.COORDINATE_SYSTEM_GRAPH, False, points, self.coordinate_system_line_thickness)
+
+
 
     def draw_button(self, rect, text, hover, pressed):
         if pressed:
