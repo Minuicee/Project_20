@@ -26,44 +26,40 @@ echo.
 
 set /p SET_NAME=Set name: 
 
-if "%SET_NAME%"=="" goto template
+if "%SET_NAME%"=="" set SET_NAME=template
 
 :: ---------------------------------
-:: Try downloading user set
+:: Prepare local directory
 :: ---------------------------------
-set SET_PATH=sets/%SET_NAME%
-
 if not exist "sets" mkdir sets
-if not exist "%SET_PATH%" mkdir "%SET_PATH%"
-if not exist "%SET_PATH%\data" mkdir "%SET_PATH%\data"
+if not exist "sets\main" mkdir sets\main
+if not exist "sets\main\data" mkdir sets\main\data
 
-echo Attempting to download set: %SET_NAME%
+echo Installing set: %SET_NAME%
 
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/%SET_PATH%/language1.csv -OutFile main/language1.csv -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/%SET_PATH%/language2.csv -OutFile main/language2.csv -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/%SET_PATH%/data/l1_data.csv -OutFile main/data/l1_data.csv -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/%SET_PATH%/data/l2_data.csv -OutFile main/data/l2_data.csv -ErrorAction SilentlyContinue"
+:: ---------------------------------
+:: Try downloading selected set
+:: ---------------------------------
+powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/language1.csv -OutFile sets/main/language1.csv -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/language2.csv -OutFile sets/main/language2.csv -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/data/l1_data.csv -OutFile sets/main/data/l1_data.csv -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/data/l2_data.csv -OutFile sets/main/data/l2_data.csv -ErrorAction SilentlyContinue"
 
-if exist "%SET_PATH%\language1.csv" (
-    echo Set downloaded successfully.
-    goto end
+if exist "sets\main\language1.csv" (
+    echo Set installed successfully.
+) else (
+    echo Invalid set name. Installing template instead...
+
+    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/language1.csv -OutFile sets/main/language1.csv"
+    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/language2.csv -OutFile sets/main/language2.csv"
+    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/data/l1_data.csv -OutFile sets/main/data/l1_data.csv"
+    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/data/l2_data.csv -OutFile sets/main/data/l2_data.csv"
+
 )
 
-echo Invalid set name. Installing template set instead...
 
-:template
 
-set SET_PATH=sets/template
-
-if not exist "%SET_PATH%" mkdir "%SET_PATH%"
-if not exist "%SET_PATH%\data" mkdir "%SET_PATH%\data"
-
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/language1.csv -OutFile main/language1.csv"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/language2.csv -OutFile main/language2.csv"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/data/l1_data.csv -OutFile main/data/l1_data.csv"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/data/l2_data.csv -OutFile main/data/l2_data.csv"
-
-echo Template set installed.
+echo set installed.
 
 :: -------------------------------
 :: Check if Python is installed

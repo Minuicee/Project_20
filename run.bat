@@ -19,14 +19,11 @@ if not exist "requirements\requirements.txt" (
     echo requirements.txt not found. Downloading...
     if not exist "requirements" mkdir requirements
     powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/requirements/requirements.txt -OutFile requirements\requirements.txt"
+    
+    echo Installing required packages...
+    pip install --upgrade pip
+    pip install -r requirements\requirements.txt
 )
-
-:: -------------------------------
-:: Install / upgrade requirements
-:: -------------------------------
-echo Installing required packages...
-pip install --upgrade pip
-pip install -r requirements\requirements.txt
 
 :: -------------------------------
 :: Check for new main.py from GitHub
