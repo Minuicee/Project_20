@@ -8,10 +8,11 @@ import random
 import math
 import sys
 
+#! note!!!!! change in main to github install.bat
 
 # parameters for dev
     #gui
-window_scale = 200
+window_scale = 150
 button_scale = 2.5 #divides through button scale
 width_ratio = 6
 height_ratio = 3
