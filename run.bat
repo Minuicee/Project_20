@@ -19,32 +19,25 @@ if not exist "requirements\requirements.txt" (
     echo requirements.txt not found. Downloading...
     if not exist "requirements" mkdir requirements
     powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/requirements/requirements.txt -OutFile requirements\requirements.txt"
-    
+
     echo Installing required packages...
     pip install --upgrade pip
     pip install -r requirements\requirements.txt
 )
 
 :: -------------------------------
-:: Check for new main.py from GitHub
+:: Ensure main.py exists
 :: -------------------------------
 set REPO_URL=https://raw.githubusercontent.com/Minuicee/Project_20/main/main.py
 set LOCAL_FILE=main.py
 
-powershell -Command "Invoke-WebRequest -Uri %REPO_URL% -OutFile temp_main.py"
-
-:: Compare temp with local
-fc temp_main.py %LOCAL_FILE% >nul
-IF %ERRORLEVEL% NEQ 0 (
-    echo New version detected. Updating main.py...
-    move /Y temp_main.py %LOCAL_FILE%
-) ELSE (
-    del temp_main.py
+if not exist "%LOCAL_FILE%" (
+    echo main.py not found. Downloading from GitHub...
+    powershell -Command "Invoke-WebRequest -Uri %REPO_URL% -OutFile %LOCAL_FILE%"
 )
 
 :: -------------------------------
-:: Run the main script
+:: Run the main script without terminal
 :: -------------------------------
-python %LOCAL_FILE%
+start "" pythonw "%LOCAL_FILE%"
 
-pause
