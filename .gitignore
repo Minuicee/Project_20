@@ -3,3 +3,7 @@ sets/test
 build
 dist
 main.spec
+sets/*/l1_data.csv
+sets/*/l2_data.csv
+data/feature_data.csv
+data/reward_data.csv
