@@ -66,11 +66,11 @@ try:
 
         #making sure parameters are in range
         if word_cap > 0 and word_cap > n_words:
-            print("Error: word_cap größer als Anzahl Wörter!")
+            print("Error: word_cap bigger than n_words!")
             sys.exit()
 
         if focused_area > n_words or (word_cap > 0 and focused_area > word_cap):
-            print("Error: focused_area größer als Anzahl Wörter oder word_cap!")
+            print("Error: focused_area bigger than n_words or word cap!")
             sys.exit()
         
         if word_cap:
