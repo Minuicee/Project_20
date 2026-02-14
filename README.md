@@ -13,11 +13,12 @@
     4 time_since_last_seen (with respect to last_seen & now)
     5 delta_index (with respect to last seen index and current session index)
     6 amount_reps
+    7 is_reversed
 
     (last reward of word)
-    7 accuracy (with respect Exponentially Moving Average (EMA) of accuracy)
-    8 last_correct (with respect to typing_start_time)
-    9 correct_streak
+    8 accuracy (with respect Exponentially Moving Average (EMA) of accuracy)
+    9 last_correct (with respect to typing_start_time)
+    10 correct_streak
 
 
 # saved data:
@@ -32,6 +33,8 @@
     [4] EMA
     [5] last_correct (with respect to typing_start_time)
     [6] correct_streak
+    [7] is reversed
+
 
 
 # rewards for the ai:
