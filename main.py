@@ -14,15 +14,15 @@ import sys
 window_scale = 200
 button_scale = 2.5 #divides through button scale
 width_ratio = 6
-height_ratio = 2
+height_ratio = 3
 font_word_ratio = 0.4
 font_input_ratio = 0.3
 button_font_ration = 0.4
 border_radius_ratio = 0.06
 gaussian_font_ratio = 0.1
-axis_padding_ratio = 0.1
+axis_padding_ratio = 0.05
     #logic
-folder = "spanish-german"
+folder = "main"
 should_save = True
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
 n_features = 7
@@ -35,7 +35,7 @@ typing_start_beta = 0.5
 time_normalization = 491700 #hours
     #standard gauss distribution parameters
 sigma_factor = 1
-sigma_factor_min = 0.01
+sigma_factor_min = 0.001
 sigma_factor_range = 4.9
 min_gauss_weights = 0.2
 min_gauss_weights_min = 0
@@ -103,6 +103,10 @@ class SRS:
 
         self.settings_clicked = False
         self.get_new_gaussian = False
+        self.ignore_next_button_up = False
+        self.selected_focused_area = 0
+        self.selected_sigma_factor = 0
+        self.selected_min_gauss_weights = 0
 
         # if something is wrong with vocab data return with error
         if not len(source) == len(target):
@@ -144,8 +148,10 @@ class SRS:
         self.BUTTON_TEXT = "#130C1D"
         self.COORDINATE_SYSTEM = "#1D3873"
         self.COORDINATE_SYSTEM_GRAPH = "#0DE5F0"
+        self.GRID_COLOR = "#14264F"
 
         self.coordinate_system_line_thickness = 5
+        self.mouse_hold = False
 
         self.clock = pygame.time.Clock()
 
@@ -161,6 +167,10 @@ class SRS:
             self.clock.tick(30)
     
     def handle_events(self):
+        global focused_area
+        global sigma_factor
+        global min_gauss_weights
+
         found_keydown = False
 
         mouse_pos = pygame.mouse.get_pos()
@@ -191,13 +201,34 @@ class SRS:
                             self.typing_start = time.time()
                             self.check_typing_start = False
                         self.input_text += event.unicode
-            elif event.type == pygame.MOUSEBUTTONDOWN and self.settings_button_hover:
-                if self.settings_clicked:
-                    self.settings_clicked = False
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                self.mouse_hold = True
+                if self.settings_button_hover:
+                    if self.settings_clicked:
+                        self.settings_clicked = False
+                    else:
+                        self.settings_clicked = True
+                        self.get_new_gaussian = True
+                        self.trigger_pause()
+                if self.coordinate_system_hover:
+                    if not self.get_new_gaussian:
+                        self.ignore_next_button_up = True
+                        self.get_new_gaussian = True
+
+            elif event.type == pygame.MOUSEBUTTONUP:
+                self.mouse_hold = False
+                if self.ignore_next_button_up == True:
+                    self.ignore_next_button_up = False
                 else:
-                    self.settings_clicked = True
-                    self.get_new_gaussian = True
-                    self.trigger_pause()
+                    if self.get_new_gaussian and self.coordinate_system_hover:
+                        sigma_factor = self.selected_sigma_factor
+                        min_gauss_weights = self.selected_min_gauss_weights
+                        focused_area = self.selected_focused_area
+                        self.get_new_gaussian = False
+                        print(self.model.gauss_distribution())
+            
+            
 
 
         if not found_keydown:
@@ -292,53 +323,65 @@ class SRS:
             word_surface = self.font_word.render(display_word, True, self.TEXT)
             word_rect = word_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 4))
             self.screen.blit(word_surface, word_rect)
-
             # text area 
             input_surface = self.font_input.render(self.input_text, True, self.TEXT)
             input_rect = input_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT * 3 // 4))
             self.screen.blit(input_surface, input_rect)
             
         else:
+            global focused_area
+            global sigma_factor
+
+            axis_padding = axis_padding_ratio * window_scale
+            
+            #draw a grid
+            self.draw_grid(self.coordinate_system_rect, n_words, axis_padding, self.GRID_COLOR)
+
+            #draw current selected curve
+            self.draw_gaussian_curve(self.screen, self.coordinate_system_rect, focused_area, sigma_factor, min_gauss_weights, self.COORDINATE_SYSTEM_GRAPH)
+
             #settings for gaussian distribution
             pygame.draw.rect(self.screen, self.COORDINATE_SYSTEM, self.coordinate_system_rect, self.coordinate_system_line_thickness, 0)
             if self.coordinate_system_hover:
 
-                x, y = self.coordinate_system_hover
-                # rect coordinates
-                rect_left = self.coordinate_system_rect.left
-                rect_right = self.coordinate_system_rect.right
-                rect_up = self.coordinate_system_rect.top
-                rect_down = self.coordinate_system_rect.bottom
+                if self.get_new_gaussian:
+                    x, y = self.coordinate_system_hover
+                    # rect coordinates
+                    rect_left = self.coordinate_system_rect.left
+                    rect_right = self.coordinate_system_rect.right
+                    rect_up = self.coordinate_system_rect.top
+                    rect_down = self.coordinate_system_rect.bottom
 
-                if rect_left < x < rect_right and rect_up < y < rect_down:
+                    if rect_left < x < rect_right and rect_up < y < rect_down:
 
-                    focused_area_local = int(((x - rect_left) / (rect_right - rect_left)) * n_words)
-                    sigma_factor_local = sigma_factor_min + ((rect_down - y) / (rect_down - rect_up)) * sigma_factor_range
-  
-                    upper_distance = n_words - 1 - focused_area_local
-                    sigma = (max(focused_area_local, upper_distance) / 3) * sigma_factor_local
-                    # draw curve based on selected values
-                    self.draw_gaussian_curve(self.screen, self.coordinate_system_rect, focused_area_local, sigma, 0)
+                        focused_area_local = int(((x - rect_left) / (rect_right - rect_left)) * n_words)
 
-                    if self.get_new_gaussian:
-                        global focused_area
-                        global sigma_factor
-                        focused_area = focused_area_local
-                        sigma_factor = sigma_factor_local
-            
-            axis_padding = axis_padding_ratio * window_scale
+                        if self.mouse_hold:
+                            y_axis = ((rect_down - y) / (rect_down - rect_up))
+                            # draw curve based on selected values
+                            self.draw_gaussian_curve(self.screen, self.coordinate_system_rect, focused_area_local, self.selected_sigma_factor, y_axis, self.RED)
+                            self.selected_min_gauss_weights = y_axis
+                            self.selected_focused_area = focused_area_local
+                        else:
+                            y_axis = (sigma_factor_min + (((rect_down - y) / (rect_down - rect_up))**2) * sigma_factor_range)
+                            # draw curve based on selected values
+                            self.draw_gaussian_curve(self.screen, self.coordinate_system_rect, focused_area_local, y_axis, 0 , self.RED)
+                            self.selected_sigma_factor = y_axis
+                            self.selected_focused_area = focused_area_local
 
             # label y axis
-            for i in range(y_labels):
-                ratio = i / (y_labels - 1)
+            amount = 11
+            for i in range(amount):
+                ratio = i / (amount - 1)
                 label_y = self.coordinate_system_rect.bottom - ratio * (self.coordinate_system_rect.height - 2*axis_padding) - axis_padding
                 label_surf = self.gaussian_font.render(f"{ratio:.2f}", True, self.COORDINATE_SYSTEM)
                 label_rect = label_surf.get_rect(right=self.coordinate_system_rect.left - 5, centery=label_y)
                 self.screen.blit(label_surf, label_rect)
 
             # label x axis
-            for i in range(x_labels):
-                ratio = i / (x_labels - 1)
+            amount = self.dim_to_grid(n_words) +1 
+            for i in range(amount):
+                ratio = i / (amount - 1)
                 label_val = int(ratio * n_words) 
                 label_x = self.coordinate_system_rect.left + ratio * (self.coordinate_system_rect.width - 2*axis_padding) + axis_padding
                 label_surf = self.gaussian_font.render(f"{label_val}", True, self.COORDINATE_SYSTEM)
@@ -351,8 +394,40 @@ class SRS:
         self.draw_button(self.settings_button, "≡", self.settings_button_hover, self.settings_clicked)
     
 
-    def draw_gaussian_curve(self, surface, rect, focused_area, sigma, min_gauss_weights):
-        sigma = max(1e-6, sigma)
+    def draw_grid(self, rect, max_x, axis_padding, color):
+        rows = 10
+        cols = self.dim_to_grid(max_x)
+        cell_width = rect.width / cols
+        cell_height = rect.height / rows
+
+        for i in range(cols + 1):
+            x = (rect.x + i * cell_width)
+            pygame.draw.line(self.screen, color, (x, rect.y), (x, rect.y + rect.height))
+
+        for j in range(rows + 1):
+            y = (rect.y + j * cell_height)
+            pygame.draw.line(self.screen, color, (rect.x, y), (rect.x + rect.width, y))
+
+    def dim_to_grid(self, dim):
+        exponent = math.floor(math.log10(dim))
+        val = 0
+        if exponent == 0:
+            val = 10
+        elif exponent == 1:
+            val = dim
+        elif exponent == 2:
+            val = dim/10
+        elif exponent == 3:
+            val = dim/1000
+        else:
+            val = 0
+        while not val < 15:
+            val /= 2
+        return int(val)
+
+    def draw_gaussian_curve(self, surface, rect, focused_area, sigma_factor, min_gauss_weights, color):
+        upper_distance = n_words - 1 - focused_area
+        sigma = (max(focused_area, upper_distance) / 3) * sigma_factor
 
         weights = []
         for i in range(n_words):
@@ -377,7 +452,7 @@ class SRS:
             points.append((px, py))
 
         if len(points) > 1:
-            pygame.draw.lines(surface, self.COORDINATE_SYSTEM_GRAPH, False, points, self.coordinate_system_line_thickness)
+            pygame.draw.lines(surface, color, False, points, self.coordinate_system_line_thickness)
 
 
 

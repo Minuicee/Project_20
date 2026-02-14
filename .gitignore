@@ -1,2 +1,5 @@
 myenv
 sets/test
+build
+dist
+main.spec
