@@ -7,7 +7,7 @@ setlocal
 if exist "venv\Scripts\activate.bat" (
     call venv\Scripts\activate
 ) ELSE (
-    echo Virtual environment not found. Please run setup.bat first.
+    echo Virtual environment not found. Please run install.bat first.
     pause
     exit /b
 )
