@@ -39,5 +39,5 @@ if not exist "%LOCAL_FILE%" (
 :: -------------------------------
 :: Run the main script without terminal
 :: -------------------------------
-start "" pythonw "%LOCAL_FILE%"
+start "" python "%LOCAL_FILE%"
 
