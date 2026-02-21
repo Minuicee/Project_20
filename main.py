@@ -3,16 +3,20 @@ import pandas as pd
 import pygame
 
 #standard libraries
+import tkinter
+from tkinter import filedialog
 import time
 import random
 import math
 import sys
+import os
 
-#! note!!!!! change in main to github install.bat
+#! tmp for asking data saves
+#! new file for ai? but more to download then
 
 # parameters for dev
     #gui
-window_scale = 150
+window_scale = 200
 button_scale = 2.5 #divides through button scale
 width_ratio = 6
 height_ratio = 3
@@ -23,15 +27,14 @@ border_radius_ratio = 0.06
 gaussian_font_ratio = 0.1
 axis_padding_ratio = 0.05
     #logic
-folder = "main"
-should_save = True
+should_save = False
 should_reverse = False #init as bool
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
 n_features = 8
 len_timer = 30 
 max_inactive_ticks = 300 #30ticks/second
     #ai parameters
-reverse_translation = 0 #0 means r.t. impossible, 1 always, everything else is a weight. to let the ai decide 0.5 is standard
+#*reverse_translation = 0 #0 means r.t. impossible, 1 always, everything else is a weight. to let the ai decide 0.5 is standard
 ema_alpha = 0.3
 typing_start_alpha = 4
 typing_start_beta = 0.5
@@ -57,44 +60,12 @@ feature_columns = [
     "is_reversed"
 ]
 
-#init vocab and translation
-try:
-
-    # init first language vocab
-    with open(f"sets/{folder}/language1.csv", "r") as f:
-        l1 = [line.strip().lower() for line in f]
-        n_words = len(l1)
-
-        #making sure parameters are in range
-        if word_cap > 0 and word_cap > n_words:
-            print("Error: word_cap bigger than n_words!")
-            sys.exit()
-
-        if focused_area > n_words or (word_cap > 0 and focused_area > word_cap):
-            print("Error: focused_area bigger than n_words or word cap!")
-            sys.exit()
-        
-        if word_cap:
-            l1 = l1[:word_cap]
-            n_words = len(l1)
-    # init corresponding second language
-    with open(f"sets/{folder}/language2.csv", "r") as f:
-        l2 = [line.strip().lower() for line in f]
-        if word_cap:
-            l2 = l2[:word_cap]
-
-    source = l1
-    target = l2
-
-except Exception as e:
-    print(e)
-
-
 class SRS:
 
     def __init__(self):
         pygame.init()
 
+        self.folder = ""
         self.current_index = 0
         self.ticks = 0
         self.timer_running = False
@@ -105,6 +76,7 @@ class SRS:
         self.session_index = 0
         self.input_text = ""
         self.inactive_ticks = 0
+        self.n_words = 0
 
         self.settings_clicked = False
         self.get_new_gaussian = False
@@ -113,15 +85,65 @@ class SRS:
         self.selected_sigma_factor = 0
         self.selected_min_gauss_weights = 0
 
-        # if something is wrong with vocab data return with error
-        if not len(l1) == len(l2):
-            return 1
+        self.init_gui(width_ratio * window_scale, height_ratio * window_scale)
+
+        self.prompt_folder()
+
+        self.init_folder()
 
         # init ai model
-        self.model = word_based_AI()
+        self.model = word_based_AI(self.n_words, self.folder)
 
-        self.init_gui(width_ratio * window_scale, height_ratio * window_scale)
-        self.get_new_index()
+    def prompt_folder(self):
+        root = tkinter.Tk()
+        root.withdraw()
+
+        start_dir = os.path.abspath("./sets")
+
+        self.folder = os.path.basename(filedialog.askdirectory(
+            title="Select file",
+            initialdir=start_dir
+        ))
+
+        root.destroy()
+
+
+    def init_folder(self):
+        #init vocab and translation
+        try:
+
+            # init first language vocab
+            with open(f"sets/{self.folder}/language1.csv", "r", encoding="utf-8") as f:
+                self.l1 = [line.strip().lower() for line in f]
+                self.n_words = len(self.l1)
+
+                #making sure parameters are in range
+                if word_cap > 0 and word_cap > self.n_words:
+                    print("Error: word_cap bigger than n_words!")
+                    sys.exit()
+
+                if focused_area > self.n_words or (word_cap > 0 and focused_area > word_cap):
+                    print("Error: focused_area bigger than n_words or word cap!")
+                    sys.exit()
+                
+                if word_cap:
+                    self.l1 = self.l1[:word_cap]
+                    self.n_words = len(self.l1)
+            # init corresponding second language
+            with open(f"sets/{self.folder}/language2.csv", "r", encoding="utf-8") as f:
+                self.l2 = [line.strip().lower() for line in f]
+                if word_cap:
+                    self.l2 = self.l2[:word_cap]
+
+            self.source = self.l1
+            self.target = self.l2
+
+            # if something is wrong with vocab data return with error
+            if not len(self.l1) == len(self.l2):
+                return 1
+
+        except Exception as e:
+            print(e)
 
     def init_gui(self, width, height):
         # Window
@@ -283,10 +305,10 @@ class SRS:
             # save language data
             if should_reverse:
                 self.model.df2[self.current_index] = word_data
-                pd.DataFrame(self.model.df2).to_csv(f"sets/{folder}/l2_data.csv", mode="w", index=False, header=feature_columns)
+                pd.DataFrame(self.model.df2).to_csv(f"sets/{self.folder}/l2_data.csv", mode="w", index=False, header=feature_columns)
             else:
                 self.model.df1[self.current_index] = word_data
-                pd.DataFrame(self.model.df1).to_csv(f"sets/{folder}/l1_data.csv", mode="w", index=False, header=feature_columns)
+                pd.DataFrame(self.model.df1).to_csv(f"sets/{self.folder}/l1_data.csv", mode="w", index=False, header=feature_columns)
             
             # save data points
             pd.DataFrame([word_data]).to_csv("data/feature_data.csv", mode="a", index=False, header=False)
@@ -311,20 +333,18 @@ class SRS:
         print(f"input length ({input_len}) is bigger than or equal min input length ({min_input_len}): {input_len >= min_input_len}")
 
     def get_new_index(self):
-        global source
-        global target
 
         should_reverse = False
 
         if should_reverse:
-            source = l2
-            target = l1
+            self.source = self.l2
+            self.target = self.l1
 
         else:
-            source = l1
-            target = l2
+            self.source = self.l1
+            self.target = self.l2
 
-        self.current_index = random.randint(0, n_words-1)
+        self.current_index = random.randint(0, self.n_words-1)
         self.new_index_time = time.time()
         self.check_typing_start = True
 
@@ -338,13 +358,13 @@ class SRS:
                     self.get_new_index()
                 else:
                     self.ticks -= 1
-                    self.input_text = target[self.current_index]
+                    self.input_text = self.target[self.current_index]
                 
             # source word
             if self.pause_triggered:
                 display_word = "Press any key to proceed.."
             else:
-                display_word = source[self.current_index]
+                display_word = self.source[self.current_index]
             word_surface = self.font_word.render(display_word, True, self.TEXT)
             word_rect = word_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 4))
             self.screen.blit(word_surface, word_rect)
@@ -360,7 +380,7 @@ class SRS:
             axis_padding = axis_padding_ratio * window_scale
             
             #draw a grid
-            self.draw_grid(self.coordinate_system_rect, n_words, axis_padding, self.GRID_COLOR)
+            self.draw_grid(self.coordinate_system_rect, self.n_words,  self.GRID_COLOR)
 
             #draw current selected curve
             self.draw_gaussian_curve(self.screen, self.coordinate_system_rect, focused_area, sigma_factor, min_gauss_weights, self.COORDINATE_SYSTEM_GRAPH)
@@ -379,7 +399,7 @@ class SRS:
 
                     if rect_left < x < rect_right and rect_up < y < rect_down:
 
-                        focused_area_local = int(((x - rect_left) / (rect_right - rect_left)) * n_words)
+                        focused_area_local = int(((x - rect_left) / (rect_right - rect_left)) * self.n_words)
 
                         if self.mouse_hold:
                             y_axis = ((rect_down - y) / (rect_down - rect_up))
@@ -404,10 +424,10 @@ class SRS:
                 self.screen.blit(label_surf, label_rect)
 
             # label x axis
-            amount = self.dim_to_grid(n_words) +1 
+            amount = self.dim_to_grid(self.n_words) +1 
             for i in range(amount):
                 ratio = i / (amount - 1)
-                label_val = int(ratio * n_words) 
+                label_val = int(ratio * self.n_words) 
                 label_x = self.coordinate_system_rect.left + ratio * (self.coordinate_system_rect.width - 2*axis_padding) + axis_padding
                 label_surf = self.gaussian_font.render(f"{label_val}", True, self.COORDINATE_SYSTEM)
                 label_rect = label_surf.get_rect(centerx=label_x, top=self.coordinate_system_rect.bottom + 5)
@@ -417,8 +437,11 @@ class SRS:
 
         # open settings
         self.draw_button(self.settings_button, "≡", self.settings_button_hover, self.settings_clicked)
+
+        # select other folder
+        self.folder_button #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     
-    def draw_grid(self, rect, max_x, axis_padding, color):
+    def draw_grid(self, rect, max_x, color):
         rows = 10
         cols = self.dim_to_grid(max_x)
         cell_width = rect.width / cols
@@ -450,11 +473,11 @@ class SRS:
         return int(val)
 
     def draw_gaussian_curve(self, surface, rect, focused_area, sigma_factor, min_gauss_weights, color):
-        upper_distance = n_words - 1 - focused_area
+        upper_distance = self.n_words - 1 - focused_area
         sigma = (max(focused_area, upper_distance) / 3) * sigma_factor
 
         weights = []
-        for i in range(n_words):
+        for i in range(self.n_words):
             val = math.exp(-0.5 * ((i - focused_area) / sigma) ** 2)
             val = val * (1 - min_gauss_weights) + min_gauss_weights
             weights.append(val)
@@ -471,7 +494,7 @@ class SRS:
 
         points = []
         for i, w in enumerate(weights):
-            px = inner_left + (i / (n_words - 1)) * inner_width
+            px = inner_left + (i / (self.n_words - 1)) * inner_width
             py = inner_bottom - w * inner_height
             points.append((px, py))
 
@@ -490,7 +513,7 @@ class SRS:
     def is_correct(self):
         # if the written words come up in the target assume it is a right answer
         input = self.filter(self.input_text)
-        target_word = self.filter(target[self.current_index])
+        target_word = self.filter(self.target[self.current_index])
         min_input_len = math.ceil(math.sqrt(sum([len(word) for word in target_word])))
         input_len = sum([len(word) for word in input])
 
@@ -510,7 +533,10 @@ class SRS:
 
 class word_based_AI:
 
-    def __init__(self):
+    def __init__(self, n_words, folder):
+        self.n_words = n_words
+        self.folder = folder
+
         # init collected data
         try:
             self.init_df_tensor(1)
@@ -552,11 +578,11 @@ class word_based_AI:
 
     def init_df_tensor(self, num):
         if num == 1:
-            df1 = pd.read_csv(f"sets/{folder}/l1_data.csv", header=0)
+            df1 = pd.read_csv(f"sets/{self.folder}/l1_data.csv", header=0)
             # reset occurrences in session and save as self.df
             self.df1 = self.set_row_val(df1.values.tolist(), 0, 0.0)
         else:
-            df2 = pd.read_csv(f"sets/{folder}/l2_data.csv", header=0)
+            df2 = pd.read_csv(f"sets/{self.folder}/l2_data.csv", header=0)
             # reset occurrences in session and save as self.df
             self.df2 = self.set_row_val(df2.values.tolist(), 0, 0.0)
 
@@ -571,12 +597,12 @@ class word_based_AI:
 
     def gauss_distribution(self):
         # get a gauss distribution across the units that will be weight for the ai
-        upper_distance = n_words - 1 - focused_area
+        upper_distance = self.n_words - 1 - focused_area
         # the parameter sigma is calculated based upon the distance to the first or last unit with respect to the chosen factor
         sigma = (max(focused_area, upper_distance) / 3) * sigma_factor
 
         weights = []
-        for i in range(n_words):
+        for i in range(self.n_words):
             val = math.exp(-0.5*((i - focused_area)/sigma)**2) * (1 - min_gauss_weights) + min_gauss_weights
             weights.append(val)
         return weights

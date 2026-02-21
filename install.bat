@@ -20,7 +20,7 @@ powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Mi
 :: Ask user for set name
 :: ---------------------------------
 echo.
-echo Enter set name (example: latin-german)
+echo Enter set name (e.g. template)
 echo Leave empty to use template.
 echo.
 
@@ -32,28 +32,27 @@ if "%SET_NAME%"=="" set SET_NAME=template
 :: Prepare local directory
 :: ---------------------------------
 if not exist "sets" mkdir sets
-if not exist "sets\main" mkdir sets\main
-if not exist "sets\main\data" mkdir sets\main\data
+if not exist "sets\%SET_NAME%" mkdir sets\%SET_NAME%
 
 echo Installing set: %SET_NAME%
 
 :: ---------------------------------
 :: Try downloading selected set
 :: ---------------------------------
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/language1.csv -OutFile sets/main/language1.csv -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/language2.csv -OutFile sets/main/language2.csv -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/data/l1_data.csv -OutFile sets/main/data/l1_data.csv -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/data/l2_data.csv -OutFile sets/main/data/l2_data.csv -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/language1.csv -OutFile sets/%SET_NAME%/language1.csv -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/language2.csv -OutFile sets/%SET_NAME%/language2.csv -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/data/l1_data.csv -OutFile sets/%SET_NAME%/data/l1_data.csv -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/data/l2_data.csv -OutFile sets/%SET_NAME%/data/l2_data.csv -ErrorAction SilentlyContinue"
 
 if exist "sets\main\language1.csv" (
     echo Set installed successfully.
 ) else (
     echo Invalid set name. Installing template instead...
 
-    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/language1.csv -OutFile sets/main/language1.csv"
-    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/language2.csv -OutFile sets/main/language2.csv"
-    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/data/l1_data.csv -OutFile sets/main/data/l1_data.csv"
-    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/data/l2_data.csv -OutFile sets/main/data/l2_data.csv"
+    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/language1.csv -OutFile sets/template/language1.csv"
+    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/language2.csv -OutFile sets/template/language2.csv"
+    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/data/l1_data.csv -OutFile sets/template/data/l1_data.csv"
+    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/data/l2_data.csv -OutFile sets/template/data/l2_data.csv"
 
 )
 
