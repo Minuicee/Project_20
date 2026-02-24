@@ -13,8 +13,8 @@ if not exist "data" mkdir data
 
 echo Downloading core data files...
 
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/data/feature_data.csv -OutFile data/feature_data.csv"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/data/reward_data.csv -OutFile data/reward_data.csv"
+powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/data/feature_data.csv -OutFile data/feature_data.csv -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/data/reward_data.csv -OutFile data/reward_data.csv -ErrorAction SilentlyContinue"
 
 :: ---------------------------------
 :: Ask user for set name
@@ -44,21 +44,7 @@ powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Mi
 powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/data/l1_data.csv -OutFile sets/%SET_NAME%/data/l1_data.csv -ErrorAction SilentlyContinue"
 powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/data/l2_data.csv -OutFile sets/%SET_NAME%/data/l2_data.csv -ErrorAction SilentlyContinue"
 
-if exist "sets\main\language1.csv" (
-    echo Set installed successfully.
-) else (
-    echo Invalid set name. Installing template instead...
-
-    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/language1.csv -OutFile sets/template/language1.csv"
-    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/language2.csv -OutFile sets/template/language2.csv"
-    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/data/l1_data.csv -OutFile sets/template/data/l1_data.csv"
-    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/template/data/l2_data.csv -OutFile sets/template/data/l2_data.csv"
-
-)
-
-
-
-echo set installed.
+echo set installed (if exists).
 
 :: -------------------------------
 :: Check if Python is installed

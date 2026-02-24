@@ -42,7 +42,7 @@ if not exist "%LOCAL_FILE%" (
 if exist "venv\Scripts\pythonw.exe" (
     start "" "venv\Scripts\pythonw.exe" "%LOCAL_FILE%"
 ) else (
-    echo pythonw.exe not found in venv.
+    echo python.exe not found in venv.
     pause
 )
 

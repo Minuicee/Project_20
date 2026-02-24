@@ -33,6 +33,8 @@
     [4] EMA
     [5] last_correct (with respect to typing_start_time)
     [6] correct_streak
+
+    (additional data)
     [7] is reversed
 
 

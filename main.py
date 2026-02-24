@@ -11,7 +11,6 @@ import math
 import sys
 import os
 
-#! tmp for asking data saves
 #! new file for ai? but more to download then
 
 # parameters for dev
@@ -87,12 +86,49 @@ class SRS:
 
         self.init_gui(width_ratio * window_scale, height_ratio * window_scale)
 
-        self.prompt_folder()
-
+        self.init_user_data()
+        self.init_folder_info()
         self.init_folder()
 
         # init ai model
         self.model = word_based_AI(self.n_words, self.folder)
+
+    def init_user_data(self):
+        global min_gauss_weights
+        global focused_area
+        global sigma_factor
+
+        try:
+            # init min gauss weights
+            with open("user_data/min_gauss_weights.csv", "r", encoding="utf-8") as f:
+                line = f.readline().strip()
+                min_gauss_weights = float(line)
+
+            # init focused_area
+            with open("user_data/focused_area.csv", "r", encoding="utf-8") as f:
+                line = f.readline().strip()
+                focused_area = float(line)
+
+            # init sigma_factor
+            with open("user_data/sigma_factor.csv", "r", encoding="utf-8") as f:
+                line = f.readline().strip()
+                sigma_factor = float(line)
+
+        except FileNotFoundError:
+            os.makedirs("user_data", exist_ok=True)
+
+
+    def init_folder_info(self):
+        try:
+            with open("user_data/folder.csv", "r", encoding="utf-8") as f:
+                line = f.readline().strip()
+                self.folder = line
+
+        except FileNotFoundError:
+            os.makedirs("user_data", exist_ok=True)
+
+        if self.folder == "":
+            self.prompt_folder()
 
     def prompt_folder(self):
         root = tkinter.Tk()
@@ -100,10 +136,21 @@ class SRS:
 
         start_dir = os.path.abspath("./sets")
 
-        self.folder = os.path.basename(filedialog.askdirectory(
+        tmp_folder = os.path.basename(filedialog.askdirectory(
             title="Select file",
             initialdir=start_dir
         ))
+
+        if tmp_folder != "":
+            self.folder = tmp_folder
+
+            with open("user_data/folder.csv", "w", encoding="utf-8") as f:
+                f.write(self.folder + "\n")
+
+            # init data again for new folder
+            self.init_folder()
+            self.model.init_data(self.n_words, self.folder)
+            self.get_new_index()
 
         root.destroy()
 
@@ -158,7 +205,7 @@ class SRS:
 
         # Buttons
         self.settings_button = pygame.Rect(0.05*window_scale,0.05*window_scale,self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.folder_button = pygame.Rect(0.05*window_scale, 0.7* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.folder_button = pygame.Rect(0.05*window_scale, 0.55* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
         self.coordinate_system_rect = pygame.Rect(self.WIDTH // 7, self.HEIGHT // 10, self.WIDTH * 7 // 10, self.HEIGHT * 7 // 10)
 
         # colours
@@ -240,7 +287,12 @@ class SRS:
                         self.settings_clicked = True
                         self.get_new_gaussian = True
                         self.trigger_pause()
-                if self.coordinate_system_hover:
+
+                elif self.folder_button_hover:
+                    self.prompt_folder()
+                    self.trigger_pause()
+                    
+                elif self.coordinate_system_hover:
                     if not self.get_new_gaussian:
                         self.ignore_next_button_up = True
                         self.get_new_gaussian = True
@@ -251,13 +303,11 @@ class SRS:
                     self.ignore_next_button_up = False
                 else:
                     if self.get_new_gaussian and self.coordinate_system_hover:
-                        sigma_factor = self.selected_sigma_factor
-                        min_gauss_weights = self.selected_min_gauss_weights
-                        focused_area = self.selected_focused_area
+                        self.save_sigma_factor(self.selected_sigma_factor)
+                        self.save_min_gauss_weights(self.selected_min_gauss_weights)
+                        self.save_focused_area(self.selected_focused_area)
                         self.get_new_gaussian = False
             
-            
-
 
         if not found_keydown:
             self.inactive_ticks += 1
@@ -317,6 +367,24 @@ class SRS:
             pd.DataFrame([new_ema - old_ema]).to_csv("data/reward_data.csv", mode="a", index=False, header=False)
 
         self.print_data_tensor(word_data) #*
+
+    def save_sigma_factor(self, selected_sigma_factor):
+        global sigma_factor
+        sigma_factor = selected_sigma_factor
+        with open("user_data/sigma_factor.csv", "w", encoding="utf-8") as f:
+            f.write(str(sigma_factor) + "\n")
+
+    def save_min_gauss_weights(self, selected_min_gauss_weights):
+        global min_gauss_weights
+        min_gauss_weights = selected_min_gauss_weights
+        with open("user_data/min_gauss_weights.csv", "w", encoding="utf-8") as f:
+            f.write(str(min_gauss_weights) + "\n")
+
+    def save_focused_area(self, selected_focused_area):
+        global focused_area
+        focused_area = selected_focused_area
+        with open("user_data/focused_area.csv", "w", encoding="utf-8") as f:
+            f.write(str(focused_area) + "\n")                
 
     def account_typing_start_time(self, correct, typing_start_time):
         return math.exp(-typing_start_time / typing_start_alpha) * (1-typing_start_beta) + typing_start_beta if correct else 0.0
@@ -536,46 +604,50 @@ class SRS:
 class word_based_AI:
 
     def __init__(self, n_words, folder):
+
+        self.init_data(n_words, folder)
+
+    def init_data(self, n_words, folder):
         self.n_words = n_words
         self.folder = folder
 
         # init collected data
         try:
             self.init_df_tensor(1)
-            if n_words != len(self.df1):
+            if self.n_words != len(self.df1):
                 # file doesnt have enough rows ( in case vocab was added later on )
-                rows = [[0.0]*n_features for _ in range(n_words - len(self.df1))]
+                rows = [[0.0]*n_features for _ in range(self.n_words - len(self.df1))]
                 # asign start bias to ema
                 rows = self.set_row_val(rows, 4, 0.5)
-                pd.DataFrame(rows).to_csv(f"sets/{folder}/l1_data.csv", mode="a", index=False, header=False)
+                pd.DataFrame(rows).to_csv(f"sets/{self.folder}/l1_data.csv", mode="a", index=False, header=False)
                 self.init_df_tensor(1)
 
         except Exception as _:
             # file doesnt exist
-            rows = [[0.0]*n_features for _ in range(n_words)]
+            rows = [[0.0]*n_features for _ in range(self.n_words)]
             # asign start bias to ema
             rows = self.set_row_val(rows, 4, 0.5)
-            pd.DataFrame(rows).to_csv(f"sets/{folder}/l1_data.csv", mode="a", index=False, header=feature_columns)
+            pd.DataFrame(rows).to_csv(f"sets/{self.folder}/l1_data.csv", mode="a", index=False, header=feature_columns)
             self.init_df_tensor(1)
 
         try:
             self.init_df_tensor(2)
-            if n_words != len(self.df2):
+            if self.n_words != len(self.df2):
                 # file doesnt have enough rows ( in case vocab was added later on )
-                rows = [[0.0]*n_features for _ in range(n_words - len(self.df2))]
+                rows = [[0.0]*n_features for _ in range(self.n_words - len(self.df2))]
                 # asign start bias to ema
                 rows = self.set_row_val(rows, 4, 0.5)
-                pd.DataFrame(rows).to_csv(f"sets/{folder}/l2_data.csv", mode="a", index=False, header=False)
+                pd.DataFrame(rows).to_csv(f"sets/{self.folder}/l2_data.csv", mode="a", index=False, header=False)
                 self.init_df_tensor(2)
 
         except Exception as _:
             # file doesnt exist
-            rows = [[0.0]*n_features for _ in range(n_words)]
+            rows = [[0.0]*n_features for _ in range(self.n_words)]
             # asign start bias to ema
             rows = self.set_row_val(rows, 4, 0.5)
             # set should reverse true
             rows = self.set_row_val(rows, 7, 1.0)
-            pd.DataFrame(rows).to_csv(f"sets/{folder}/l2_data.csv", mode="a", index=False, header=feature_columns)
+            pd.DataFrame(rows).to_csv(f"sets/{self.folder}/l2_data.csv", mode="a", index=False, header=feature_columns)
             self.init_df_tensor(2)
 
     def init_df_tensor(self, num):
