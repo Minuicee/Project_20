@@ -17,7 +17,7 @@ import os
 
 # parameters for dev
     #gui
-window_scale = 150
+window_scale = 200
 button_scale = 2.5 #divides through button scale
 width_ratio = 6
 height_ratio = 3
@@ -39,7 +39,7 @@ reverse_translation = 0 #0 means r.t. impossible, 1 always, everything else is a
 ema_alpha = 0.3
 typing_start_alpha = 4
 typing_start_beta = 0.5
-time_normalization = 491700 #hours
+time_normalization = 492200 #hours
     #standard gauss distribution parameters
 sigma_factor = 1
 sigma_factor_min = 0.001
@@ -80,6 +80,8 @@ class SRS:
         self.input_text = ""
         self.inactive_ticks = 0
         self.n_words = 0
+        self.df1 = 0
+        self.df2 = 0
 
         self.settings_clicked = False
         self.get_new_gaussian = False
@@ -90,33 +92,34 @@ class SRS:
 
         self.init_gui(width_ratio * window_scale, height_ratio * window_scale)
 
-        self.init_user_data()
         self.init_folder_info()
         self.init_folder()
+        self.init_set_config()
+        self.init_data()
 
-    def init_user_data(self):
+    def init_set_config(self):
         global min_gauss_weights
         global focused_area
         global sigma_factor
 
         try:
             # init min gauss weights
-            with open("user_data/min_gauss_weights.csv", "r", encoding="utf-8") as f:
+            with open(f"sets/{self.folder}/config/min_gauss_weights.csv", "r", encoding="utf-8") as f:
                 line = f.readline().strip()
                 min_gauss_weights = float(line)
 
             # init focused_area
-            with open("user_data/focused_area.csv", "r", encoding="utf-8") as f:
+            with open(f"sets/{self.folder}/config/focused_area.csv", "r", encoding="utf-8") as f:
                 line = f.readline().strip()
                 focused_area = float(line)
 
             # init sigma_factor
-            with open("user_data/sigma_factor.csv", "r", encoding="utf-8") as f:
+            with open(f"sets/{self.folder}/config/sigma_factor.csv", "r", encoding="utf-8") as f:
                 line = f.readline().strip()
                 sigma_factor = float(line)
 
         except FileNotFoundError:
-            os.makedirs("user_data", exist_ok=True)
+            os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
 
     def init_folder_info(self):
         try:
@@ -148,6 +151,7 @@ class SRS:
                 f.write(self.folder + "\n")
 
             # init data again for new folder
+            self.init_set_config()
             self.init_folder()
             self.init_data()
             self.get_new_index()
@@ -204,8 +208,8 @@ class SRS:
 
         # Buttons
         self.settings_button = pygame.Rect(0.05*window_scale,0.05*window_scale,self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.folder_button = pygame.Rect(0.05*window_scale, 0.55* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.coordinate_system_rect = pygame.Rect(self.WIDTH // 7, self.HEIGHT // 10, self.WIDTH * 7 // 10, self.HEIGHT * 7 // 10)
+        self.folder_button = pygame.Rect(0.55*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.coordinate_system_rect = pygame.Rect(self.WIDTH // 7, self.HEIGHT // 5, self.WIDTH * 7 // 10, self.HEIGHT * 7 // 10)
 
         # colours
         self.DARK = "#0D0E29"
@@ -370,20 +374,35 @@ class SRS:
     def save_sigma_factor(self, selected_sigma_factor):
         global sigma_factor
         sigma_factor = selected_sigma_factor
-        with open("user_data/sigma_factor.csv", "w", encoding="utf-8") as f:
-            f.write(str(sigma_factor) + "\n")
+        try:
+            with open(f"sets/{self.folder}/config/sigma_factor.csv", "w", encoding="utf-8") as f:
+                f.write(str(sigma_factor) + "\n")
+        except FileNotFoundError:
+            os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
+            with open(f"sets/{self.folder}/config/sigma_factor.csv", "w", encoding="utf-8") as f:
+                f.write(str(sigma_factor) + "\n")
 
     def save_min_gauss_weights(self, selected_min_gauss_weights):
         global min_gauss_weights
         min_gauss_weights = selected_min_gauss_weights
-        with open("user_data/min_gauss_weights.csv", "w", encoding="utf-8") as f:
-            f.write(str(min_gauss_weights) + "\n")
+        try:
+            with open(f"sets/{self.folder}/config/min_gauss_weights.csv", "w", encoding="utf-8") as f:
+                f.write(str(min_gauss_weights) + "\n")
+        except FileNotFoundError:
+            os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
+            with open(f"sets/{self.folder}/config/min_gauss_weights.csv", "w", encoding="utf-8") as f:
+                f.write(str(min_gauss_weights) + "\n")
 
     def save_focused_area(self, selected_focused_area):
         global focused_area
         focused_area = selected_focused_area
-        with open("user_data/focused_area.csv", "w", encoding="utf-8") as f:
-            f.write(str(focused_area) + "\n")                
+        try:
+            with open(f"sets/{self.folder}/config/focused_area.csv", "w", encoding="utf-8") as f:
+                f.write(str(focused_area) + "\n")
+        except FileNotFoundError:
+            os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
+            with open(f"sets/{self.folder}/config/focused_area.csv", "w", encoding="utf-8") as f:
+                f.write(str(focused_area) + "\n")            
 
     def account_typing_start_time(self, correct, typing_start_time):
         return math.exp(-typing_start_time / typing_start_alpha) * (1-typing_start_beta) + typing_start_beta if correct else 0.0
@@ -435,7 +454,7 @@ class SRS:
             else:
                 display_word = self.source[self.current_index]
             word_surface = self.font_word.render(display_word, True, self.TEXT)
-            word_rect = word_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 4))
+            word_rect = word_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT *3 // 8))
             self.screen.blit(word_surface, word_rect)
             # text area 
             input_surface = self.font_input.render(self.input_text, True, self.TEXT)
