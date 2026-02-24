@@ -16,7 +16,7 @@ import os
 
 # parameters for dev
     #gui
-window_scale = 200
+window_scale = 150
 button_scale = 2.5 #divides through button scale
 width_ratio = 6
 height_ratio = 3
@@ -158,6 +158,7 @@ class SRS:
 
         # Buttons
         self.settings_button = pygame.Rect(0.05*window_scale,0.05*window_scale,self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.folder_button = pygame.Rect(0.05*window_scale, 0.7* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
         self.coordinate_system_rect = pygame.Rect(self.WIDTH // 7, self.HEIGHT // 10, self.WIDTH * 7 // 10, self.HEIGHT * 7 // 10)
 
         # colours
@@ -202,6 +203,7 @@ class SRS:
 
         mouse_pos = pygame.mouse.get_pos()
         self.settings_button_hover = self.settings_button.collidepoint(mouse_pos)
+        self.folder_button_hover = self.folder_button.collidepoint(mouse_pos)
         self.coordinate_system_hover = mouse_pos if self.coordinate_system_rect.collidepoint(mouse_pos) else None
 
         for event in pygame.event.get():
@@ -439,7 +441,7 @@ class SRS:
         self.draw_button(self.settings_button, "≡", self.settings_button_hover, self.settings_clicked)
 
         # select other folder
-        self.folder_button #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        self.draw_button(self.folder_button, "./", self.folder_button_hover, False)
     
     def draw_grid(self, rect, max_x, color):
         rows = 10
