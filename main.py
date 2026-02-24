@@ -11,7 +11,9 @@ import math
 import sys
 import os
 
-#! new file for ai? but more to download then
+
+# TODO reverse_translation slider
+# TODO gaussian button
 
 # parameters for dev
     #gui
@@ -26,14 +28,14 @@ border_radius_ratio = 0.06
 gaussian_font_ratio = 0.1
 axis_padding_ratio = 0.05
     #logic
-should_save = False
+should_save = True
 should_reverse = False #init as bool
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
 n_features = 8
 len_timer = 30 
 max_inactive_ticks = 300 #30ticks/second
     #ai parameters
-#*reverse_translation = 0 #0 means r.t. impossible, 1 always, everything else is a weight. to let the ai decide 0.5 is standard
+reverse_translation = 0 #0 means r.t. impossible, 1 always, everything else is a weight. to let the ai decide 0.5 is standard
 ema_alpha = 0.3
 typing_start_alpha = 4
 typing_start_beta = 0.5
@@ -58,6 +60,8 @@ feature_columns = [
     "correct_streak",
     "is_reversed"
 ]
+
+
 
 class SRS:
 
@@ -90,9 +94,6 @@ class SRS:
         self.init_folder_info()
         self.init_folder()
 
-        # init ai model
-        self.model = word_based_AI(self.n_words, self.folder)
-
     def init_user_data(self):
         global min_gauss_weights
         global focused_area
@@ -116,7 +117,6 @@ class SRS:
 
         except FileNotFoundError:
             os.makedirs("user_data", exist_ok=True)
-
 
     def init_folder_info(self):
         try:
@@ -149,11 +149,10 @@ class SRS:
 
             # init data again for new folder
             self.init_folder()
-            self.model.init_data(self.n_words, self.folder)
+            self.init_data()
             self.get_new_index()
 
         root.destroy()
-
 
     def init_folder(self):
         #init vocab and translation
@@ -338,9 +337,9 @@ class SRS:
 
         # save new language data
         if should_reverse:
-            word_data = self.model.df2[self.current_index] # currently saved data
+            word_data = self.df2[self.current_index] # currently saved data
         else:
-            word_data = self.model.df1[self.current_index] # currently saved data
+            word_data = self.df1[self.current_index] # currently saved data
         old_ema = word_data[4]
         new_ema = self.get_ema(old_ema=word_data[4], accuracy=correct)
 
@@ -356,11 +355,11 @@ class SRS:
         if should_save:
             # save language data
             if should_reverse:
-                self.model.df2[self.current_index] = word_data
-                pd.DataFrame(self.model.df2).to_csv(f"sets/{self.folder}/l2_data.csv", mode="w", index=False, header=feature_columns)
+                self.df2[self.current_index] = word_data
+                pd.DataFrame(self.df2).to_csv(f"sets/{self.folder}/l2_data.csv", mode="w", index=False, header=feature_columns)
             else:
-                self.model.df1[self.current_index] = word_data
-                pd.DataFrame(self.model.df1).to_csv(f"sets/{self.folder}/l1_data.csv", mode="w", index=False, header=feature_columns)
+                self.df1[self.current_index] = word_data
+                pd.DataFrame(self.df1).to_csv(f"sets/{self.folder}/l1_data.csv", mode="w", index=False, header=feature_columns)
             
             # save data points
             pd.DataFrame([word_data]).to_csv("data/feature_data.csv", mode="a", index=False, header=False)
@@ -599,18 +598,7 @@ class SRS:
             word = word.replace(c, "")
         return str(word).lower().split()
 
-
-
-class word_based_AI:
-
-    def __init__(self, n_words, folder):
-
-        self.init_data(n_words, folder)
-
-    def init_data(self, n_words, folder):
-        self.n_words = n_words
-        self.folder = folder
-
+    def init_data(self):
         # init collected data
         try:
             self.init_df_tensor(1)
@@ -665,25 +653,9 @@ class word_based_AI:
             row[col] = val
         return df
 
-    def get_word(self):
-
-        distribution_weights = self.gauss_distribution()
-
-    def gauss_distribution(self):
-        # get a gauss distribution across the units that will be weight for the ai
-        upper_distance = self.n_words - 1 - focused_area
-        # the parameter sigma is calculated based upon the distance to the first or last unit with respect to the chosen factor
-        sigma = (max(focused_area, upper_distance) / 3) * sigma_factor
-
-        weights = []
-        for i in range(self.n_words):
-            val = math.exp(-0.5*((i - focused_area)/sigma)**2) * (1 - min_gauss_weights) + min_gauss_weights
-            weights.append(val)
-        return weights
 
 # run main
 if __name__ == "__main__":
     application = SRS()
-    application.model.get_word()
     application.run()
     
