@@ -31,7 +31,7 @@
 
     (last reward of word)
     [4] EMA
-    [5] last_correct (with respect to typing_start_time)
+    [5] last_correct (with respect to typing_start_time and correct with respect to word distance)
     [6] correct_streak
 
     (additional data)

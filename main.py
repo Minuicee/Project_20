@@ -28,7 +28,7 @@ border_radius_ratio = 0.06
 gaussian_font_ratio = 0.1
 axis_padding_ratio = 0.05
     #logic
-should_save = True
+should_save = False #!
 should_reverse = False #init as bool
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
 n_features = 8
@@ -60,7 +60,6 @@ feature_columns = [
     "correct_streak",
     "is_reversed"
 ]
-
 
 
 class SRS:
@@ -154,7 +153,7 @@ class SRS:
             self.init_set_config()
             self.init_folder()
             self.init_data()
-            self.get_new_index()
+            self.get_new_index() #!!!!
 
         root.destroy()
 
@@ -321,17 +320,17 @@ class SRS:
         self.input_text = ""
         self.pause_triggered = True
 
-    def check_input(self):
+    def check_input(self): 
         correct = self.is_correct()
-
+        print(correct)
         self.session_index += 1 
 
-        if correct:
-            self.save_data(correct=True)
+        if correct == 1:
             self.TEXT = self.GREEN
         else:
-            self.save_data(correct=False)
             self.TEXT = self.RED
+
+        self.save_data(correct)
 
         self.timer_running = True
         self.ticks = len_timer
@@ -353,7 +352,7 @@ class SRS:
         word_data[3] += 1 # n reps
         word_data[4] = new_ema # exponentially moving average of accuracy
         word_data[5] = round(self.account_typing_start_time(correct, (self.typing_start - self.new_index_time)), 4) # last correct 
-        word_data[6] = word_data[6]+1 if correct else 0 # correct streak
+        word_data[6] = word_data[6]+1 if correct == 1 else 0 # correct streak
         word_data[7] = should_reverse
 
         if should_save:
@@ -405,6 +404,7 @@ class SRS:
                 f.write(str(focused_area) + "\n")            
 
     def account_typing_start_time(self, correct, typing_start_time):
+        print(self.typing_start) #!
         return math.exp(-typing_start_time / typing_start_alpha) * (1-typing_start_beta) + typing_start_beta if correct else 0.0
 
     def get_ema(self, old_ema, accuracy):
@@ -415,10 +415,11 @@ class SRS:
         for i in range(len(feature_columns)):
             print(f"{feature_columns[i]}: {tensor[i]}")
 
-    def print_validation_reason(self, input, target, min_input_len, input_len):
+    def print_validation_reason(self, input, target, min_input_len, input_len, distance):
         print()
         print(f"all words ({input}) are in target ({target}): {all(word in target for word in input)}")
         print(f"input length ({input_len}) is bigger than or equal min input length ({min_input_len}): {input_len >= min_input_len}")
+        print(f"sum of word distances: {distance}")
 
     def get_new_index(self):
 
@@ -605,13 +606,32 @@ class SRS:
         min_input_len = math.ceil(math.sqrt(sum([len(word) for word in target_word])))
         input_len = sum([len(word) for word in input])
 
-        self.print_validation_reason(input, target_word, min_input_len, input_len) #*
-
-        if input == "idk":
+        if input == ["idk"]:
             return False
         
-        return True if all(word in target_word for word in input) and min_input_len <= input_len else False
+        requirement = True if min_input_len <= input_len else False
+        distance = sum(min([self.word_distance(input_word, word) for word in target_word]) for input_word in input) if requirement else 0
+        normalized_distance = self.normalize_distance(distance)
+
+        self.print_validation_reason(input, target_word, min_input_len, input_len, distance) 
+
+        return normalized_distance
     
+    def normalize_distance(self, distance):
+        max_effective_distance = 3
+
+        # normalize word distance:
+        # 0 distance -> 1
+        # 1 distance -> 0.67
+        # 2 distance -> 0.34
+        # 3 distance -> 0
+        # 4 distance -> 0
+
+        clipped = min(distance, max_effective_distance)
+        normalized = 1 - (clipped / max_effective_distance)
+
+        return normalized
+
     def filter(self, word):
         for c in ignore_characters:
             word = word.replace(c, "")
@@ -671,6 +691,18 @@ class SRS:
         for row in df:
             row[col] = val
         return df
+    
+    def word_distance(self, s1, s2):
+        # levensthein word distance
+        # (copy pasted)
+        len1, len2 = len(s1), len(s2)
+        dp = [[0] * (len2 + 1) for _ in range(len1 + 1)]
+        for i in range(len1 + 1): dp[i][0] = i
+        for j in range(len2 + 1): dp[0][j] = j
+        for i in range(1, len1 + 1):
+            for j in range(1, len2 + 1):
+                dp[i][j] = dp[i-1][j-1] if s1[i-1] == s2[j-1] else 1 + min(dp[i-1][j-1], dp[i-1][j], dp[i][j-1])
+        return dp[len1][len2]
 
 
 # run main
