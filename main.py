@@ -5,13 +5,14 @@ import pygame
 #standard libraries
 import tkinter
 from tkinter import filedialog
+import platform
 import time
 import random
 import math
 import sys
 import os
 
-
+# TODO edit word
 # TODO reverse_translation slider
 # TODO gaussian button
 
@@ -37,8 +38,6 @@ max_inactive_ticks = 300 #30ticks/second
     #ai parameters
 reverse_translation = 0 #0 means r.t. impossible, 1 always, everything else is a weight. to let the ai decide 0.5 is standard
 ema_alpha = 0.3
-typing_start_alpha = 4
-typing_start_beta = 0.5
 time_normalization = 492200 #hours
     #standard gauss distribution parameters
 sigma_factor = 1
@@ -48,8 +47,8 @@ min_gauss_weights = 0.2
 min_gauss_weights_min = 0
 min_gauss_weights_range = 0.9
 focused_area = 0 # cant be bigger than word_cap and n_words
-    #others
-ignore_characters = "'()/,?!\"\n."
+ignore_characters = " '(),?!\"\n."
+ignore_words = ["der", "die", "das"] # german articles
 feature_columns = [
     "occurrences_session",
     "last_seen",
@@ -79,8 +78,9 @@ class SRS:
         self.input_text = ""
         self.inactive_ticks = 0
         self.n_words = 0
-        self.df1 = 0
-        self.df2 = 0
+        self.is_linux = False
+        self.df1 = []
+        self.df2 = []
 
         self.settings_clicked = False
         self.get_new_gaussian = False
@@ -91,10 +91,19 @@ class SRS:
 
         self.init_gui(width_ratio * window_scale, height_ratio * window_scale)
 
+        self.check_os()
+
         self.init_folder_info()
         self.init_folder()
         self.init_set_config()
         self.init_data()
+
+        self.trigger_pause()
+
+    def check_os(self):
+        # look if linux is used because filedialog doesnt properly work there
+        if platform.system().lower() == "linux":
+            self.is_linux = True
 
     def init_set_config(self):
         global min_gauss_weights
@@ -121,6 +130,9 @@ class SRS:
             os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
 
     def init_folder_info(self):
+        if self.is_linux:
+            self.prompt_folder()
+
         try:
             with open("user_data/folder.csv", "r", encoding="utf-8") as f:
                 line = f.readline().strip()
@@ -129,7 +141,7 @@ class SRS:
         except FileNotFoundError:
             os.makedirs("user_data", exist_ok=True)
 
-        if self.folder == "":
+        while self.folder == "":
             self.prompt_folder()
 
     def prompt_folder(self):
@@ -143,7 +155,7 @@ class SRS:
             initialdir=start_dir
         ))
 
-        if tmp_folder != "":
+        if tmp_folder and tmp_folder != "sets":
             self.folder = tmp_folder
 
             with open("user_data/folder.csv", "w", encoding="utf-8") as f:
@@ -153,7 +165,6 @@ class SRS:
             self.init_set_config()
             self.init_folder()
             self.init_data()
-            self.get_new_index() #!!!!
 
         root.destroy()
 
@@ -290,7 +301,7 @@ class SRS:
                         self.get_new_gaussian = True
                         self.trigger_pause()
 
-                elif self.folder_button_hover:
+                elif self.folder_button_hover and not self.is_linux:
                     self.prompt_folder()
                     self.trigger_pause()
                     
@@ -322,7 +333,6 @@ class SRS:
 
     def check_input(self): 
         correct = self.is_correct()
-        print(correct)
         self.session_index += 1 
 
         if correct == 1:
@@ -404,8 +414,8 @@ class SRS:
                 f.write(str(focused_area) + "\n")            
 
     def account_typing_start_time(self, correct, typing_start_time):
-        print(self.typing_start) #!
-        return math.exp(-typing_start_time / typing_start_alpha) * (1-typing_start_beta) + typing_start_beta if correct else 0.0
+        # view curve README file
+        return min(1.0, math.exp((-typing_start_time + 1) / 4) * (0.6) + 0.4 if correct else 0.0)
 
     def get_ema(self, old_ema, accuracy):
         return ema_alpha*accuracy + (1-ema_alpha)*old_ema
@@ -417,9 +427,9 @@ class SRS:
 
     def print_validation_reason(self, input, target, min_input_len, input_len, distance):
         print()
-        print(f"all words ({input}) are in target ({target}): {all(word in target for word in input)}")
-        print(f"input length ({input_len}) is bigger than or equal min input length ({min_input_len}): {input_len >= min_input_len}")
-        print(f"sum of word distances: {distance}")
+        print(f"All words ({list(input)}) are in target ({list(target)}): {all(word in target for word in input)}")
+        print(f"Input length ({input_len}) is bigger than or equal min input length ({min_input_len}): {input_len >= min_input_len}")
+        print(f"Word distances: {distance}")
 
     def get_new_index(self):
 
@@ -609,33 +619,18 @@ class SRS:
         if input == ["idk"]:
             return False
         
-        requirement = True if min_input_len <= input_len else False
-        distance = sum(min([self.word_distance(input_word, word) for word in target_word]) for input_word in input) if requirement else 0
-        normalized_distance = self.normalize_distance(distance)
+        distances = [min([self.word_distance(input_word, word) for word in target_word]) for input_word in input]
+        correct = all(input[i] in target_word if len(input[i]) <= 4 else distances[i] <= 1 for i in range(len(input))) and min_input_len <= input_len
 
-        self.print_validation_reason(input, target_word, min_input_len, input_len, distance) 
+        self.print_validation_reason(input, target_word, min_input_len, input_len, distances) 
 
-        return normalized_distance
+        return correct
     
-    def normalize_distance(self, distance):
-        max_effective_distance = 3
-
-        # normalize word distance:
-        # 0 distance -> 1
-        # 1 distance -> 0.67
-        # 2 distance -> 0.34
-        # 3 distance -> 0
-        # 4 distance -> 0
-
-        clipped = min(distance, max_effective_distance)
-        normalized = 1 - (clipped / max_effective_distance)
-
-        return normalized
-
     def filter(self, word):
+        # replace all characters on list with space
         for c in ignore_characters:
-            word = word.replace(c, "")
-        return str(word).lower().split()
+            word = word.replace(c, " ")
+        return [x for x in str(word).lower().split() if x not in ignore_words]
 
     def init_data(self):
         # init collected data

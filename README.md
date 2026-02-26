@@ -41,3 +41,14 @@
 
 # rewards for the ai:
     delta_ema
+
+# AI architecture:
+    ...
+
+# Others
+
+    ·How correct the answer is accounts the time that the user needed to start typing
+    This is the curve it uses:
+    ![account_typing_start_time](img/account_typing_start_time.png)
+    Where 1 and below is considered to be immediate
+    
