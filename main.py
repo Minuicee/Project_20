@@ -85,7 +85,7 @@ class SRS:
         self.is_linux = False
         self.last_index = -1
         self.was_reversed = False
-        self.button_pressed = False
+        self.ctrl_held = False
         self.df1 = []
         self.df2 = []
 
@@ -181,6 +181,9 @@ class SRS:
             self.init_set_config()
             self.init_folder()
             self.init_data()
+
+            self.last_index = -1
+
 
         root.destroy()
 
@@ -284,56 +287,55 @@ class SRS:
         self.edit_button_hover = self.edit_button.collidepoint(mouse_pos)
         self.coordinate_system_hover = mouse_pos if self.coordinate_system_rect.collidepoint(mouse_pos) else None
 
-        keys = pygame.key.get_pressed()
-        if keys[pygame.K_LCTRL] and not self.button_pressed:
-            if keys[pygame.K_f]:
-                self.trigger_folder_button()
-                self.button_pressed = True
-            elif keys[pygame.K_g]:
-                self.trigger_settings_button()
-                self.button_pressed = True
-            elif keys[pygame.K_e]:
-                self.trigger_edit_button()
-                self.button_pressed = True
-        else:
-            self.button_pressed = False
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
-            elif event.type == pygame.KEYDOWN and not self.timer_running and not self.settings_clicked:
-                found_keydown = True
-                self.inactive_ticks = 0
 
-                if self.pause_triggered and not self.editing_step:
-                    self.get_new_index()
-                    self.pause_triggered = False
-                    self.new_index_time = time.time()
-                    self.check_typing_start = True
+            elif event.type == pygame.KEYDOWN and not self.timer_running:
+                if event.key == pygame.K_LCTRL:
+                    self.ctrl_held = True
 
-                else:
-                    if event.key == pygame.K_RETURN:
-                        if self.input_text != "": #add a second if statement since we want it to do nothing if return is pressed but text is empty
-                            if self.editing_step == 1:
-                                language_num = 2 if should_reverse else 1
-                                self.rewrite_line(self.last_index, self.input_text, f"sets/{self.folder}/language{language_num}.csv")
-                                self.input_text = self.target[self.last_index]
-                                self.editing_step = 2
-                            elif self.editing_step == 2:
-                                language_num = 1 if should_reverse else 2
-                                self.rewrite_line(self.last_index, self.input_text, f"sets/{self.folder}/language{language_num}.csv")
-                                self.editing_step = 0
-                                self.input_text = ""
-                            else:
-                                self.check_input()
-                    elif event.key == pygame.K_BACKSPACE:
-                        self.input_text = self.input_text[:-1]
+                elif self.ctrl_held:
+                    if event.key == pygame.K_f:
+                        self.trigger_folder_button()
+                    elif event.key == pygame.K_g:
+                        self.trigger_settings_button()
+                    elif event.key == pygame.K_e:
+                        self.trigger_edit_button()
+
+                if not self.settings_clicked:
+                    found_keydown = True
+                    self.inactive_ticks = 0
+
+                    if self.pause_triggered and not self.editing_step:
+                        self.get_new_index()
+                        self.pause_triggered = False
+                        self.new_index_time = time.time()
+                        self.check_typing_start = True
+
                     else:
-                        if self.check_typing_start:
-                            self.typing_start = time.time()
-                            self.check_typing_start = False
-                        self.input_text += event.unicode
+                        if event.key == pygame.K_RETURN:
+                            if self.input_text != "": #add a second if statement since we want it to do nothing if return is pressed but text is empty
+                                if self.editing_step == 1:
+                                    language_num = 2 if should_reverse else 1
+                                    self.rewrite_line(self.last_index, self.input_text, f"sets/{self.folder}/language{language_num}.csv")
+                                    self.input_text = self.target[self.last_index]
+                                    self.editing_step = 2
+                                elif self.editing_step == 2:
+                                    language_num = 1 if should_reverse else 2
+                                    self.rewrite_line(self.last_index, self.input_text, f"sets/{self.folder}/language{language_num}.csv")
+                                    self.editing_step = 0
+                                    self.input_text = ""
+                                else:
+                                    self.check_input()
+                        elif event.key == pygame.K_BACKSPACE:
+                            self.input_text = self.input_text[:-1]
+                        else:
+                            if self.check_typing_start:
+                                self.typing_start = time.time()
+                                self.check_typing_start = False
+                            self.input_text += event.unicode
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 self.mouse_hold = True
@@ -362,14 +364,18 @@ class SRS:
                         self.save_focused_area(self.selected_focused_area)
                         self.get_new_gaussian = False
             
+            elif event.type == pygame.KEYUP:
+                if event.key == pygame.K_LCTRL:
+                    self.ctrl_held = False
+            
         if not found_keydown:
             self.inactive_ticks += 1
         if self.inactive_ticks > max_inactive_ticks:
             self.trigger_pause()
 
     def trigger_folder_button(self):
-        self.trigger_pause()
         self.prompt_folder()
+        self.trigger_pause()
 
     def trigger_settings_button(self):
         if self.settings_clicked:
