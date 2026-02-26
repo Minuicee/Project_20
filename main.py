@@ -144,6 +144,10 @@ class SRS:
             with open(f"sets/{self.folder}/config/focused_area.csv", "w", encoding="utf-8") as f:
                     f.write(str(std_focused_area) + "\n")
 
+            sigma_factor = std_sigma_factor
+            min_gauss_weights = std_min_gauss_weights
+            focused_area = std_focused_area
+
     def init_folder_info(self):
         try:
             with open("user_data/folder.csv", "r", encoding="utf-8") as f:
