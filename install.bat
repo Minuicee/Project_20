@@ -15,6 +15,8 @@ echo Downloading core data files...
 
 powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/data/feature_data.csv -OutFile data/feature_data.csv -ErrorAction SilentlyContinue"
 powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/data/reward_data.csv -OutFile data/reward_data.csv -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/img/folder_button.png -OutFile img/folder_button.png -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/img/settings_button.png -OutFile img/settings_button.png -ErrorAction SilentlyContinue"
 
 :: ---------------------------------
 :: Ask user for set name

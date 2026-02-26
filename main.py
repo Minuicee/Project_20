@@ -12,7 +12,6 @@ import math
 import sys
 import os
 
-# TODO edit word
 # TODO reverse_translation slider
 # TODO gaussian button
 
@@ -29,7 +28,7 @@ border_radius_ratio = 0.06
 gaussian_font_ratio = 0.1
 axis_padding_ratio = 0.05
     #logic
-should_save = False #!
+should_save = False
 should_reverse = False #init as bool
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
 n_features = 8
@@ -40,13 +39,17 @@ reverse_translation = 0 #0 means r.t. impossible, 1 always, everything else is a
 ema_alpha = 0.3
 time_normalization = 492200 #hours
     #standard gauss distribution parameters
-sigma_factor = 1
+std_sigma_factor = 1
+std_min_gauss_weights = 0.2
+std_focused_area = 0
+    #other gauss distribution parameters
+sigma_factor = std_sigma_factor
 sigma_factor_min = 0.001
 sigma_factor_range = 4.9
-min_gauss_weights = 0.2
+min_gauss_weights = std_min_gauss_weights
 min_gauss_weights_min = 0
 min_gauss_weights_range = 0.9
-focused_area = 0 # cant be bigger than word_cap and n_words
+focused_area = std_focused_area # cant be bigger than word_cap and n_words
 ignore_characters = " '(),?!\"\n."
 ignore_words = ["der", "die", "das"] # german articles
 feature_columns = [
@@ -67,7 +70,7 @@ class SRS:
         pygame.init()
 
         self.folder = ""
-        self.current_index = 0
+        self.current_index = -1
         self.ticks = 0
         self.timer_running = False
         self.check_typing_start = True
@@ -78,7 +81,11 @@ class SRS:
         self.input_text = ""
         self.inactive_ticks = 0
         self.n_words = 0
+        self.editing_step = 0
         self.is_linux = False
+        self.last_index = -1
+        self.was_reversed = False
+        self.button_pressed = False
         self.df1 = []
         self.df2 = []
 
@@ -129,10 +136,15 @@ class SRS:
         except FileNotFoundError:
             os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
 
-    def init_folder_info(self):
-        if self.is_linux:
-            self.prompt_folder()
+            # init new standard parameters
+            with open(f"sets/{self.folder}/config/sigma_factor.csv", "w", encoding="utf-8") as f:
+                    f.write(str(std_sigma_factor) + "\n")
+            with open(f"sets/{self.folder}/config/min_gauss_weights.csv", "w", encoding="utf-8") as f:
+                    f.write(str(std_min_gauss_weights) + "\n")
+            with open(f"sets/{self.folder}/config/focused_area.csv", "w", encoding="utf-8") as f:
+                    f.write(str(std_focused_area) + "\n")
 
+    def init_folder_info(self):
         try:
             with open("user_data/folder.csv", "r", encoding="utf-8") as f:
                 line = f.readline().strip()
@@ -216,9 +228,10 @@ class SRS:
         self.button_font = pygame.font.SysFont("DejaVu Sans", int(button_font_ration*window_scale))
         self.gaussian_font = pygame.font.SysFont("Arial", int(gaussian_font_ratio*window_scale))
 
-        # Buttons
-        self.settings_button = pygame.Rect(0.05*window_scale,0.05*window_scale,self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.folder_button = pygame.Rect(0.55*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        # Buttons in order
+        self.folder_button = pygame.Rect(0.05*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.settings_button = pygame.Rect(0.55*window_scale,0.05*window_scale,self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.edit_button = pygame.Rect(1.05*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
         self.coordinate_system_rect = pygame.Rect(self.WIDTH // 7, self.HEIGHT // 5, self.WIDTH * 7 // 10, self.HEIGHT * 7 // 10)
 
         # colours
@@ -264,7 +277,22 @@ class SRS:
         mouse_pos = pygame.mouse.get_pos()
         self.settings_button_hover = self.settings_button.collidepoint(mouse_pos)
         self.folder_button_hover = self.folder_button.collidepoint(mouse_pos)
+        self.edit_button_hover = self.edit_button.collidepoint(mouse_pos)
         self.coordinate_system_hover = mouse_pos if self.coordinate_system_rect.collidepoint(mouse_pos) else None
+
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_LCTRL] and not self.button_pressed:
+            if keys[pygame.K_f]:
+                self.trigger_folder_button()
+                self.button_pressed = True
+            elif keys[pygame.K_g]:
+                self.trigger_settings_button()
+                self.button_pressed = True
+            elif keys[pygame.K_e]:
+                self.trigger_edit_button()
+                self.button_pressed = True
+        else:
+            self.button_pressed = False
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -274,7 +302,8 @@ class SRS:
                 found_keydown = True
                 self.inactive_ticks = 0
 
-                if self.pause_triggered:
+                if self.pause_triggered and not self.editing_step:
+                    self.get_new_index()
                     self.pause_triggered = False
                     self.new_index_time = time.time()
                     self.check_typing_start = True
@@ -282,7 +311,18 @@ class SRS:
                 else:
                     if event.key == pygame.K_RETURN:
                         if self.input_text != "": #add a second if statement since we want it to do nothing if return is pressed but text is empty
-                            self.check_input()
+                            if self.editing_step == 1:
+                                language_num = 2 if should_reverse else 1
+                                self.rewrite_line(self.last_index, self.input_text, f"sets/{self.folder}/language{language_num}.csv")
+                                self.input_text = self.target[self.last_index]
+                                self.editing_step = 2
+                            elif self.editing_step == 2:
+                                language_num = 1 if should_reverse else 2
+                                self.rewrite_line(self.last_index, self.input_text, f"sets/{self.folder}/language{language_num}.csv")
+                                self.editing_step = 0
+                                self.input_text = ""
+                            else:
+                                self.check_input()
                     elif event.key == pygame.K_BACKSPACE:
                         self.input_text = self.input_text[:-1]
                     else:
@@ -293,17 +333,14 @@ class SRS:
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 self.mouse_hold = True
-                if self.settings_button_hover:
-                    if self.settings_clicked:
-                        self.settings_clicked = False
-                    else:
-                        self.settings_clicked = True
-                        self.get_new_gaussian = True
-                        self.trigger_pause()
+                if self.settings_button_hover and not self.editing_step:
+                    self.trigger_settings_button()
 
                 elif self.folder_button_hover and not self.is_linux:
-                    self.prompt_folder()
-                    self.trigger_pause()
+                    self.trigger_folder_button()
+
+                elif self.edit_button_hover and not self.last_index == -1:
+                    self.trigger_edit_button()
                     
                 elif self.coordinate_system_hover:
                     if not self.get_new_gaussian:
@@ -321,11 +358,32 @@ class SRS:
                         self.save_focused_area(self.selected_focused_area)
                         self.get_new_gaussian = False
             
-
         if not found_keydown:
             self.inactive_ticks += 1
         if self.inactive_ticks > max_inactive_ticks:
             self.trigger_pause()
+
+    def trigger_folder_button(self):
+        self.trigger_pause()
+        self.prompt_folder()
+
+    def trigger_settings_button(self):
+        if self.settings_clicked:
+            self.settings_clicked = False
+        else:
+            self.settings_clicked = True
+            self.get_new_gaussian = True
+            self.trigger_pause()
+
+    def trigger_edit_button(self):
+        if self.editing_step != 0:
+            self.editing_step = 0
+            self.input_text = ""
+
+        elif not self.settings_clicked:
+            self.trigger_pause()
+            self.input_text = self.source[self.last_index]
+            self.editing_step = 1
 
     def trigger_pause(self):
         self.input_text = ""
@@ -383,35 +441,38 @@ class SRS:
     def save_sigma_factor(self, selected_sigma_factor):
         global sigma_factor
         sigma_factor = selected_sigma_factor
-        try:
-            with open(f"sets/{self.folder}/config/sigma_factor.csv", "w", encoding="utf-8") as f:
-                f.write(str(sigma_factor) + "\n")
-        except FileNotFoundError:
-            os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
-            with open(f"sets/{self.folder}/config/sigma_factor.csv", "w", encoding="utf-8") as f:
-                f.write(str(sigma_factor) + "\n")
+        if selected_sigma_factor:
+            try:
+                with open(f"sets/{self.folder}/config/sigma_factor.csv", "w", encoding="utf-8") as f:
+                    f.write(str(sigma_factor) + "\n")
+            except FileNotFoundError:
+                os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
+                with open(f"sets/{self.folder}/config/sigma_factor.csv", "w", encoding="utf-8") as f:
+                    f.write(str(sigma_factor) + "\n")
 
     def save_min_gauss_weights(self, selected_min_gauss_weights):
         global min_gauss_weights
         min_gauss_weights = selected_min_gauss_weights
-        try:
-            with open(f"sets/{self.folder}/config/min_gauss_weights.csv", "w", encoding="utf-8") as f:
-                f.write(str(min_gauss_weights) + "\n")
-        except FileNotFoundError:
-            os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
-            with open(f"sets/{self.folder}/config/min_gauss_weights.csv", "w", encoding="utf-8") as f:
-                f.write(str(min_gauss_weights) + "\n")
+        if selected_min_gauss_weights:
+            try:
+                with open(f"sets/{self.folder}/config/min_gauss_weights.csv", "w", encoding="utf-8") as f:
+                    f.write(str(min_gauss_weights) + "\n")
+            except FileNotFoundError:
+                os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
+                with open(f"sets/{self.folder}/config/min_gauss_weights.csv", "w", encoding="utf-8") as f:
+                    f.write(str(min_gauss_weights) + "\n")
 
     def save_focused_area(self, selected_focused_area):
         global focused_area
         focused_area = selected_focused_area
-        try:
-            with open(f"sets/{self.folder}/config/focused_area.csv", "w", encoding="utf-8") as f:
-                f.write(str(focused_area) + "\n")
-        except FileNotFoundError:
-            os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
-            with open(f"sets/{self.folder}/config/focused_area.csv", "w", encoding="utf-8") as f:
-                f.write(str(focused_area) + "\n")            
+        if selected_focused_area:
+            try:
+                with open(f"sets/{self.folder}/config/focused_area.csv", "w", encoding="utf-8") as f:
+                    f.write(str(focused_area) + "\n")
+            except FileNotFoundError:
+                os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
+                with open(f"sets/{self.folder}/config/focused_area.csv", "w", encoding="utf-8") as f:
+                    f.write(str(focused_area) + "\n")            
 
     def account_typing_start_time(self, correct, typing_start_time):
         # view curve README file
@@ -432,6 +493,11 @@ class SRS:
         print(f"Word distances: {distance}")
 
     def get_new_index(self):
+        global should_reverse
+
+        if self.current_index != -1:
+            self.last_index = self.current_index
+            self.was_reversed = should_reverse
 
         should_reverse = False
 
@@ -459,11 +525,16 @@ class SRS:
                     self.ticks -= 1
                     self.input_text = self.target[self.current_index]
                 
-            # source word
-            if self.pause_triggered:
-                display_word = "Press any key to proceed.."
+            # decide what to display
+            if self.editing_step == 1:
+                display_word = f"Edit source: {self.source[self.last_index]}"
+            elif self.editing_step == 2:
+                display_word = f"Edit target: {self.target[self.last_index]}"
             else:
-                display_word = self.source[self.current_index]
+                if self.pause_triggered:
+                    display_word = "Press any key to proceed.."
+                else:
+                    display_word = self.source[self.current_index]
             word_surface = self.font_word.render(display_word, True, self.TEXT)
             word_rect = word_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT *3 // 8))
             self.screen.blit(word_surface, word_rect)
@@ -535,11 +606,22 @@ class SRS:
 
 
         # open settings
-        self.draw_button(self.settings_button, "≡", self.settings_button_hover, self.settings_clicked)
+        self.draw_button(self.settings_button, self.settings_button_hover, self.settings_clicked, image="settings_button.png")
 
         # select other folder
-        self.draw_button(self.folder_button, "./", self.folder_button_hover, False)
-    
+        self.draw_button(self.folder_button,  self.folder_button_hover, False, image="folder_button.png")
+
+        # edit prev word
+        self.draw_button(self.edit_button, self.edit_button_hover, False, image="edit_button.png")
+
+    def rewrite_line(self, line, replacement, file):
+        with open(file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        lines[line] = replacement.rstrip("\n") + "\n"
+        with open(file, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+
+
     def draw_grid(self, rect, max_x, color):
         rows = 10
         cols = self.dim_to_grid(max_x)
@@ -600,14 +682,24 @@ class SRS:
         if len(points) > 1:
             pygame.draw.lines(surface, color, False, points, self.coordinate_system_line_thickness)
 
-    def draw_button(self, rect, text, hover, pressed):
+    def draw_button(self, rect, hover, pressed, image):
         if pressed:
             color = self.BUTTON_CLICKED_HOVER if hover else self.BUTTON_CLICKED
         else:
             color = self.BUTTON_HOVER if hover else self.BUTTON_NORMAL
+
         pygame.draw.rect(self.screen, color, rect, border_radius=int(border_radius_ratio*window_scale))
-        label = self.button_font.render(text, True, self.BUTTON_TEXT)
-        self.screen.blit(label, label.get_rect(center=rect.center))
+
+        self.load_image(image, rect)
+
+    def load_image(self, image, rect):
+        # draw image if exists
+
+        image = pygame.image.load(f"img/{image}").convert_alpha()
+        image = pygame.transform.smoothscale(image, (rect.width*3//4, rect.height*3//4))    
+
+        img_rect = image.get_rect(center=rect.center)
+        self.screen.blit(image, img_rect)
 
     def is_correct(self):
         # if the written words come up in the target assume it is a right answer

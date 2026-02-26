@@ -7,3 +7,4 @@ sets/*/l2_data.csv
 sets/*/config/*
 data/*
 user_data
+log.txt
