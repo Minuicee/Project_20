@@ -28,7 +28,7 @@ border_radius_ratio = 0.06
 gaussian_font_ratio = 0.1
 axis_padding_ratio = 0.05
     #logic
-should_save = False
+should_save = True
 should_reverse = False #init as bool
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
 n_features = 8
