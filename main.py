@@ -15,6 +15,7 @@ import os
 # TODO reverse_translation slider
 # TODO gaussian button
 # TODO change gaussian range
+# TODO delete word (strg q)
 
 # parameters for dev
     #gui
@@ -40,9 +41,9 @@ reverse_translation = 0 #0 means r.t. impossible, 1 always, everything else is a
 ema_alpha = 0.3
 time_normalization = 492200 #hours
     #standard gauss distribution parameters
-std_sigma_factor = 1
-std_min_gauss_weights = 0
-std_focused_area = 0
+std_sigma_factor = 1.0
+std_min_gauss_weights = 0.0
+std_focused_area = 0.0
     #other gauss distribution parameters
 sigma_factor = std_sigma_factor
 sigma_factor_min = 0.001
@@ -78,7 +79,7 @@ class SRS:
         self.pause_triggered = False
         self.new_index_time = 0
         self.typing_start = 0
-        self.session_index = 0
+        self.index = 0
         self.input_text = ""
         self.inactive_ticks = 0
         self.n_words = 0
@@ -90,12 +91,13 @@ class SRS:
         self.coordinate_click_start_time = 0
         self.df1 = []
         self.df2 = []
-
+        self.idx_since_delete = 1
         self.settings_clicked = False
         self.get_new_gaussian = False
         self.ignore_next_button_up = False
         self.selected_focused_area = 0
         self.selected_sigma_factor = 0
+        self.image_cache = {}
         self.selected_min_gauss_weights = 0
 
         self.init_gui(width_ratio * window_scale, height_ratio * window_scale)
@@ -103,7 +105,7 @@ class SRS:
         self.check_os()
 
         self.init_data_folder()
-        self.init_folder_info()
+        self.init_user_data_info()
         self.init_folder()
         self.init_set_config()
         self.init_data()
@@ -116,13 +118,16 @@ class SRS:
             self.is_linux = True
 
     def init_data_folder(self):
-        try:
-            with open("data/feature_data.csv", "r", encoding="utf-8") as f:
-                pass
-            with open("data/feature_data.csv", "r", encoding="utf-8") as f:
-                pass
-        except FileNotFoundError:
-            os.makedirs("data", exist_ok=True)
+        os.makedirs("data", exist_ok=True)
+
+        feature_path = "data/feature_data.csv"
+        reward_path = "data/reward_data.csv"
+
+        if not os.path.exists(feature_path):
+            pd.DataFrame().to_csv(feature_path, index=False, header=False)
+
+        if not os.path.exists(reward_path):
+            pd.DataFrame().to_csv(reward_path, index=False, header=False)
 
     def init_set_config(self):
         global min_gauss_weights
@@ -144,6 +149,7 @@ class SRS:
             with open(f"sets/{self.folder}/config/sigma_factor.csv", "r", encoding="utf-8") as f:
                 line = f.readline().strip()
                 sigma_factor = float(line)
+                print(f"151: {sigma_factor}")
 
         except FileNotFoundError:
             os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
@@ -157,14 +163,18 @@ class SRS:
                     f.write(str(std_focused_area) + "\n")
 
             sigma_factor = std_sigma_factor
+            print(f"165: {sigma_factor}")
             min_gauss_weights = std_min_gauss_weights
             focused_area = std_focused_area
 
-    def init_folder_info(self):
+    def init_user_data_info(self):
         try:
             with open("user_data/folder.csv", "r", encoding="utf-8") as f:
                 line = f.readline().strip()
                 self.folder = line
+            with open("user_data/index.csv", "r", encoding="utf-8") as f:
+                line = f.readline().strip()
+                self.index = int(line)
 
         except FileNotFoundError:
             os.makedirs("user_data", exist_ok=True)
@@ -231,6 +241,9 @@ class SRS:
 
             # if something is wrong with vocab data return with error
             if not len(self.l1) == len(self.l2):
+                return 1
+            
+            if self.n_words <= 1:
                 return 1
 
         except Exception as e:
@@ -315,6 +328,8 @@ class SRS:
                         self.trigger_settings_button()
                     elif event.key == pygame.K_e:
                         self.trigger_edit_button()
+                    elif event.key == pygame.K_BACKSPACE:
+                        self.input_text = ""
 
                 if not self.settings_clicked:
                     found_keydown = True
@@ -382,7 +397,7 @@ class SRS:
                 if event.key == pygame.K_LCTRL:
                     self.ctrl_held = False
             
-        if not found_keydown:
+        if not found_keydown and not self.editing_step:
             self.inactive_ticks += 1
         if self.inactive_ticks > max_inactive_ticks:
             self.trigger_pause()
@@ -400,6 +415,9 @@ class SRS:
             self.trigger_pause()
 
     def trigger_edit_button(self):
+        if self.idx_since_delete > 1:
+            self.delete_last_dp()
+
         if self.editing_step != 0:
             self.editing_step = 0
             self.input_text = ""
@@ -415,7 +433,7 @@ class SRS:
 
     def check_input(self): 
         correct = self.is_correct()
-        self.session_index += 1 
+        self.increment_index()
 
         if correct == 1:
             self.TEXT = self.GREEN
@@ -428,27 +446,43 @@ class SRS:
         self.ticks = len_timer
         self.input_text = ""
 
+    def increment_index(self):
+        self.index += 1
+        with open("user_data/index.csv", "w", encoding="utf-8") as f:
+            f.write(str(self.index) + "\n")
+
+
     def save_data(self, correct):
 
-        # save new language data
+        # get old word data
         if should_reverse:
             word_data = self.df2[self.current_index] # currently saved data
         else:
             word_data = self.df1[self.current_index] # currently saved data
-        old_ema = word_data[4]
-        new_ema = self.get_ema(old_ema=word_data[4], accuracy=correct)
 
-        word_data[0] += 1 # occurrences in session (will be reset on new session)
-        word_data[1] = round(time.time()/3600 - time_normalization, 4) # last seen (in hours)
-        word_data[2] = self.session_index # last seen index
-        word_data[3] += 1 # n reps
-        word_data[4] = new_ema # exponentially moving average of accuracy
-        word_data[5] = round(self.account_typing_start_time(correct, (self.typing_start - self.new_index_time)), 4) # last correct 
-        word_data[6] = word_data[6]+1 if correct == 1 else 0 # correct streak
-        word_data[7] = should_reverse
+        # only save data if word_data is not the init value
+        usable_for_ai = word_data[3] >= 1
 
         if should_save:
-            # save language data
+            if usable_for_ai:
+                #save old word data (and resulting reward after)
+                pd.DataFrame([word_data]).to_csv("data/feature_data.csv", mode="a", index=False, header=False)
+
+            #get new word data
+            old_ema = word_data[4]
+            new_ema = self.get_ema(old_ema=word_data[4], accuracy=correct)
+
+            word_data[0] += 1.0 # occurrences in session (will be reset on new session)
+            word_data[1] = round(time.time()/3600 - time_normalization, 4) # last seen (in hours)
+            word_data[2] = float(self.index) # last seen index
+            word_data[3] += 1.0 # n reps
+            word_data[4] = new_ema # exponentially moving average of accuracy
+            word_data[5] = self.account_typing_start_time(correct, (self.typing_start - self.new_index_time)) # last correct 
+            word_data[6] = word_data[6]+1 if correct == 1.0 else 0.0 # correct streak
+            word_data[7] = should_reverse
+
+            
+            # save new word data in language data
             if should_reverse:
                 self.df2[self.current_index] = word_data
                 pd.DataFrame(self.df2).to_csv(f"sets/{self.folder}/l2_data.csv", mode="w", index=False, header=feature_columns)
@@ -456,16 +490,17 @@ class SRS:
                 self.df1[self.current_index] = word_data
                 pd.DataFrame(self.df1).to_csv(f"sets/{self.folder}/l1_data.csv", mode="w", index=False, header=feature_columns)
             
-            # save data points
-            pd.DataFrame([word_data]).to_csv("data/feature_data.csv", mode="a", index=False, header=False)
-            pd.DataFrame([new_ema - old_ema]).to_csv("data/reward_data.csv", mode="a", index=False, header=False)
+            if usable_for_ai:
+                # save reward resulting from old data
+                pd.DataFrame([new_ema - old_ema]).to_csv("data/reward_data.csv", mode="a", index=False, header=False)
 
-        self.print_data_tensor(word_data) #*
+            self.print_data_tensor(word_data)
 
     def save_sigma_factor(self, selected_sigma_factor):
         global sigma_factor
-        sigma_factor = selected_sigma_factor
         if selected_sigma_factor:
+            sigma_factor = selected_sigma_factor
+            print(f"484: {sigma_factor}")
             try:
                 with open(f"sets/{self.folder}/config/sigma_factor.csv", "w", encoding="utf-8") as f:
                     f.write(str(sigma_factor) + "\n")
@@ -520,6 +555,7 @@ class SRS:
         global should_reverse
 
         if self.current_index != -1:
+            self.idx_since_delete += 1
             self.last_index = self.current_index
             self.was_reversed = should_reverse
 
@@ -645,9 +681,17 @@ class SRS:
     def rewrite_line(self, line, replacement, file):
         with open(file, "r", encoding="utf-8") as f:
             lines = f.readlines()
+        replacement = replacement.replace("\x05", "")
         lines[line] = replacement.rstrip("\n") + "\n"
         with open(file, "w", encoding="utf-8") as f:
             f.writelines(lines)
+
+    def delete_last_dp(self):
+        tmp = pd.read_csv("data/feature_data.csv")
+        tmp.iloc[:-1].to_csv("data/feature_data.csv", index=False, header=False)
+        tmp = pd.read_csv("data/reward_data.csv")
+        tmp.iloc[:-1].to_csv("data/reward_data.csv", index=False, header=False)
+        self.idx_since_delete = 0
 
     def draw_grid(self, rect, max_x, color):
         rows = 10
@@ -720,13 +764,15 @@ class SRS:
         self.load_image(image, rect)
 
     def load_image(self, image, rect):
-        # draw image if exists
+        if image not in self.image_cache:
+            img = pygame.image.load(f"img/{image}").convert_alpha()
+            self.image_cache[image] = img
+        else:
+            img = self.image_cache[image]
 
-        image = pygame.image.load(f"img/{image}").convert_alpha()
-        image = pygame.transform.smoothscale(image, (rect.width*3//4, rect.height*3//4))    
-
-        img_rect = image.get_rect(center=rect.center)
-        self.screen.blit(image, img_rect)
+        img_scaled = pygame.transform.smoothscale(img, (rect.width*3//4, rect.height*3//4))
+        img_rect = img_scaled.get_rect(center=rect.center)
+        self.screen.blit(img_scaled, img_rect)
 
     def is_correct(self):
         # if the written words come up in the target assume it is a right answer
