@@ -1,3 +1,4 @@
 pandas
 pygame
 torch
+numpy

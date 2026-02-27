@@ -1,5 +1,6 @@
 #external libraries
 import pandas as pd
+import numpy as np
 import pygame
 
 #standard libraries
@@ -7,13 +8,13 @@ import tkinter
 from tkinter import filedialog
 import platform
 import time
-import random
 import math
 import sys
 import os
 
 # TODO reverse_translation slider
 # TODO gaussian button
+# TODO change gaussian range
 
 # parameters for dev
     #gui
@@ -21,8 +22,8 @@ window_scale = 200
 button_scale = 2.5 #divides through button scale
 width_ratio = 6
 height_ratio = 3
-font_word_ratio = 0.4
-font_input_ratio = 0.3
+font_word_ratio = 0.3
+font_input_ratio = 0.2
 button_font_ration = 0.4
 border_radius_ratio = 0.06
 gaussian_font_ratio = 0.1
@@ -40,7 +41,7 @@ ema_alpha = 0.3
 time_normalization = 492200 #hours
     #standard gauss distribution parameters
 std_sigma_factor = 1
-std_min_gauss_weights = 0.2
+std_min_gauss_weights = 0
 std_focused_area = 0
     #other gauss distribution parameters
 sigma_factor = std_sigma_factor
@@ -82,10 +83,11 @@ class SRS:
         self.inactive_ticks = 0
         self.n_words = 0
         self.editing_step = 0
-        self.is_linux = False
         self.last_index = -1
         self.was_reversed = False
         self.ctrl_held = False
+        self.is_linux = False
+        self.coordinate_click_start_time = 0
         self.df1 = []
         self.df2 = []
 
@@ -100,6 +102,7 @@ class SRS:
 
         self.check_os()
 
+        self.init_data_folder()
         self.init_folder_info()
         self.init_folder()
         self.init_set_config()
@@ -111,6 +114,15 @@ class SRS:
         # look if linux is used because filedialog doesnt properly work there
         if platform.system().lower() == "linux":
             self.is_linux = True
+
+    def init_data_folder(self):
+        try:
+            with open("data/feature_data.csv", "r", encoding="utf-8") as f:
+                pass
+            with open("data/feature_data.csv", "r", encoding="utf-8") as f:
+                pass
+        except FileNotFoundError:
+            os.makedirs("data", exist_ok=True)
 
     def init_set_config(self):
         global min_gauss_weights
@@ -349,9 +361,11 @@ class SRS:
                     self.trigger_edit_button()
                     
                 elif self.coordinate_system_hover:
+                    self.coordinate_click_start_time = time.time()
                     if not self.get_new_gaussian:
                         self.ignore_next_button_up = True
                         self.get_new_gaussian = True
+                        self.mouse_hold = False
 
             elif event.type == pygame.MOUSEBUTTONUP:
                 self.mouse_hold = False
@@ -519,7 +533,10 @@ class SRS:
             self.source = self.l1
             self.target = self.l2
 
-        self.current_index = random.randint(0, self.n_words-1)
+        # get new index
+        self.word_vals = np.random.rand(self.n_words) * self.gauss_distribution()
+        self.current_index = np.argmax(self.word_vals)
+
         self.new_index_time = time.time()
         self.check_typing_start = True
 
@@ -581,16 +598,17 @@ class SRS:
 
                         focused_area_local = int(((x - rect_left) / (rect_right - rect_left)) * self.n_words)
 
-                        if self.mouse_hold:
+                        delta_start_time = time.time() - self.coordinate_click_start_time
+                        if self.mouse_hold and delta_start_time > 0.2:
                             y_axis = ((rect_down - y) / (rect_down - rect_up))
                             # draw curve based on selected values
                             self.draw_gaussian_curve(self.screen, self.coordinate_system_rect, focused_area_local, self.selected_sigma_factor, y_axis, self.RED)
-                            self.selected_min_gauss_weights = y_axis
+                            self.selected_min_gauss_weights = round(y_axis, 1) # round tenth
                             self.selected_focused_area = focused_area_local
                         else:
                             y_axis = (sigma_factor_min + (((rect_down - y) / (rect_down - rect_up))**2) * sigma_factor_range)
                             # draw curve based on selected values
-                            self.draw_gaussian_curve(self.screen, self.coordinate_system_rect, focused_area_local, y_axis, 0 , self.RED)
+                            self.draw_gaussian_curve(self.screen, self.coordinate_system_rect, focused_area_local, y_axis, self.selected_min_gauss_weights , self.RED)
                             self.selected_sigma_factor = y_axis
                             self.selected_focused_area = focused_area_local
 
@@ -630,7 +648,6 @@ class SRS:
         lines[line] = replacement.rstrip("\n") + "\n"
         with open(file, "w", encoding="utf-8") as f:
             f.writelines(lines)
-
 
     def draw_grid(self, rect, max_x, color):
         rows = 10
@@ -801,6 +818,20 @@ class SRS:
                 dp[i][j] = dp[i-1][j-1] if s1[i-1] == s2[j-1] else 1 + min(dp[i-1][j-1], dp[i-1][j], dp[i][j-1])
         return dp[len1][len2]
 
+    def gauss_distribution(self):
+        global sigma_factor
+        global min_gauss_weights
+        global focused_area
+        # get a gauss distribution across the units that will be weight for the ai
+        upper_distance = self.n_words - 1 - focused_area
+        # the parameter sigma is calculated based upon the distance to the first or last unit with respect to the chosen factor
+        sigma = (max(focused_area, upper_distance) / 3) * sigma_factor
+
+        weights = []
+        for i in range(self.n_words):
+            val = math.exp(-0.5*((i - focused_area)/sigma)**2) * (1 - min_gauss_weights) + min_gauss_weights
+            weights.append(val)
+        return weights
 
 # run main
 if __name__ == "__main__":
