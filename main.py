@@ -33,7 +33,6 @@ width_ratio = 6
 height_ratio = 3
 font_word_ratio = 0.3
 font_input_ratio = 0.2
-button_font_ration = 0.4
 border_radius_ratio = 0.06
 gaussian_font_ratio = 0.1
 axis_padding_ratio = 0.05
@@ -264,7 +263,6 @@ class SRS:
         # Fonts
         self.font_word = pygame.font.SysFont("Arial", int(font_word_ratio*window_scale))
         self.font_input = pygame.font.SysFont("Arial", int(font_input_ratio*window_scale))
-        self.button_font = pygame.font.SysFont("DejaVu Sans", int(button_font_ration*window_scale))
         self.gaussian_font = pygame.font.SysFont("Arial", int(gaussian_font_ratio*window_scale))
 
         # Buttons in order

@@ -16,6 +16,8 @@ echo Downloading core data files...
 
 powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/img/folder_button.png -OutFile img/folder_button.png -ErrorAction SilentlyContinue"
 powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/img/settings_button.png -OutFile img/settings_button.png -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/img/edit_button.png -OutFile img/edit_button.png -ErrorAction SilentlyContinue"
+
 
 :: ---------------------------------
 :: Ask user for set name
@@ -72,7 +74,7 @@ call venv\Scripts\activate
 if not exist "requirements\requirements.txt" (
     echo requirements.txt not found. Downloading...
     if not exist "requirements" mkdir requirements
-    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/requirements/requirements.txt -OutFile requirements\requirements.txt"
+    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/requirements/requirements.txt -OutFile SRS/requirements\requirements.txt"
 )
 
 :: -------------------------------
