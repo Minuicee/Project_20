@@ -4,7 +4,6 @@ import numpy as np
 import pygame
 
 #standard libraries
-import ctypes
 import tkinter
 from tkinter import filedialog
 import platform
@@ -22,8 +21,6 @@ import os
 
 # TODO vocab checkup with analysis
 
-# TODO laptop font not displaying accents
-# TODO img not downloaded
 
 # parameters for dev
     #gui
@@ -39,7 +36,7 @@ axis_padding_ratio = 0.05
     #logic
 should_save = True
 should_reverse = False #init as bool
-word_cap = 326 # 0 means no cap. cant be bigger than n_words.
+word_cap = 0 # 0 means no cap. cant be bigger than n_words.
 n_features = 8
 len_timer = 30 
 max_inactive_ticks = 300 #30ticks/second
@@ -78,6 +75,7 @@ class SRS:
     def __init__(self):
         pygame.init()
 
+        # init variables
         self.folder = ""
         self.current_index = -1
         self.ticks = 0
@@ -261,9 +259,9 @@ class SRS:
         self.HEIGHT = height
 
         # Fonts
-        self.font_word = pygame.font.SysFont("Arial", int(font_word_ratio*window_scale))
-        self.font_input = pygame.font.SysFont("Arial", int(font_input_ratio*window_scale))
-        self.gaussian_font = pygame.font.SysFont("Arial", int(gaussian_font_ratio*window_scale))
+        self.font_word = pygame.font.SysFont("calibri", int(font_word_ratio*window_scale))
+        self.font_input = pygame.font.SysFont("calibri", int(font_input_ratio*window_scale))
+        self.gaussian_font = pygame.font.SysFont("calibri", int(gaussian_font_ratio*window_scale))
 
         # Buttons in order
         self.folder_button = pygame.Rect(0.05*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
