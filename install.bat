@@ -10,6 +10,7 @@ echo.
 :: Always download global data files
 :: ---------------------------------
 if not exist "data" mkdir data
+if not exist "img" mkdir img
 
 echo Downloading core data files...
 

@@ -4,6 +4,7 @@ import numpy as np
 import pygame
 
 #standard libraries
+import ctypes
 import tkinter
 from tkinter import filedialog
 import platform
@@ -13,9 +14,16 @@ import sys
 import os
 
 # TODO reverse_translation slider
+# TODO word cap slider
 # TODO gaussian button
 # TODO change gaussian range
 # TODO delete word (strg q)
+# TODO explore?
+
+# TODO vocab checkup with analysis
+
+# TODO laptop font not displaying accents
+# TODO img not downloaded
 
 # parameters for dev
     #gui
@@ -32,7 +40,7 @@ axis_padding_ratio = 0.05
     #logic
 should_save = True
 should_reverse = False #init as bool
-word_cap = 0 # 0 means no cap. cant be bigger than n_words.
+word_cap = 326 # 0 means no cap. cant be bigger than n_words.
 n_features = 8
 len_timer = 30 
 max_inactive_ticks = 300 #30ticks/second
@@ -88,10 +96,10 @@ class SRS:
         self.was_reversed = False
         self.ctrl_held = False
         self.is_linux = False
+        self.mouse_hold = False
         self.coordinate_click_start_time = 0
         self.df1 = []
         self.df2 = []
-        self.idx_since_delete = 1
         self.settings_clicked = False
         self.get_new_gaussian = False
         self.ignore_next_button_up = False
@@ -149,7 +157,6 @@ class SRS:
             with open(f"sets/{self.folder}/config/sigma_factor.csv", "r", encoding="utf-8") as f:
                 line = f.readline().strip()
                 sigma_factor = float(line)
-                print(f"151: {sigma_factor}")
 
         except FileNotFoundError:
             os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
@@ -163,7 +170,6 @@ class SRS:
                     f.write(str(std_focused_area) + "\n")
 
             sigma_factor = std_sigma_factor
-            print(f"165: {sigma_factor}")
             min_gauss_weights = std_min_gauss_weights
             focused_area = std_focused_area
 
@@ -250,6 +256,7 @@ class SRS:
             print(e)
 
     def init_gui(self, width, height):
+
         # Window
         self.WIDTH = width
         self.HEIGHT = height
@@ -284,7 +291,6 @@ class SRS:
         self.GRID_COLOR = "#14264F"
 
         self.coordinate_system_line_thickness = 5
-        self.mouse_hold = False
 
         self.clock = pygame.time.Clock()
 
@@ -415,8 +421,6 @@ class SRS:
             self.trigger_pause()
 
     def trigger_edit_button(self):
-        if self.idx_since_delete > 1:
-            self.delete_last_dp()
 
         if self.editing_step != 0:
             self.editing_step = 0
@@ -461,10 +465,11 @@ class SRS:
             word_data = self.df1[self.current_index] # currently saved data
 
         # only save data if word_data is not the init value
-        usable_for_ai = word_data[3] >= 1
+        usable_for_ai = word_data[3] >= 2
 
         if should_save:
             if usable_for_ai:
+
                 #save old word data (and resulting reward after)
                 pd.DataFrame([word_data]).to_csv("data/feature_data.csv", mode="a", index=False, header=False)
 
@@ -500,7 +505,6 @@ class SRS:
         global sigma_factor
         if selected_sigma_factor:
             sigma_factor = selected_sigma_factor
-            print(f"484: {sigma_factor}")
             try:
                 with open(f"sets/{self.folder}/config/sigma_factor.csv", "w", encoding="utf-8") as f:
                     f.write(str(sigma_factor) + "\n")
@@ -542,6 +546,7 @@ class SRS:
 
     def print_data_tensor(self, tensor):
         print()
+        print(f" ---id: {self.current_index} --- ")
         for i in range(len(feature_columns)):
             print(f"{feature_columns[i]}: {tensor[i]}")
 
@@ -555,7 +560,6 @@ class SRS:
         global should_reverse
 
         if self.current_index != -1:
-            self.idx_since_delete += 1
             self.last_index = self.current_index
             self.was_reversed = should_reverse
 
@@ -570,7 +574,7 @@ class SRS:
             self.target = self.l2
 
         # get new index
-        self.word_vals = np.random.rand(self.n_words) * self.gauss_distribution()
+        self.word_vals = np.random.rand(self.n_words)#! * self.gauss_distribution()
         self.current_index = np.argmax(self.word_vals)
 
         self.new_index_time = time.time()
@@ -691,7 +695,6 @@ class SRS:
         tmp.iloc[:-1].to_csv("data/feature_data.csv", index=False, header=False)
         tmp = pd.read_csv("data/reward_data.csv")
         tmp.iloc[:-1].to_csv("data/reward_data.csv", index=False, header=False)
-        self.idx_since_delete = 0
 
     def draw_grid(self, rect, max_x, color):
         rows = 10
