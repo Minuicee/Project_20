@@ -70,9 +70,13 @@ A vocabulary learning app built with **Pygame** that quizzes you on word pairs a
 
 ### Rewards for the AI
 
-$$\Delta_{\text{EMA}} = \text{EMA}_{\text{new}} - \text{EMA}_{\text{old}}$$
+$$\text{reward} = \text{EMA}_{\text{new}} - \text{EMA}_{\text{expected}}$$
 
-The reward is the **delta EMA** — how much the word's accuracy EMA changed after the attempt. Positive = improvement, negative = regression.
+$$\text{EMA}_{\text{expected}} = \text{EMA}_{\text{old}} \cdot e^{-\lambda \cdot \Delta t}$$
+
+where $\Delta t$ is the time since the word was last seen (in hours) and $\lambda$ controls the forgetting rate.
+
+The reward is positive if the new EMA is **better than expected** given how long ago the word was last seen, and negative if worse. This prevents the AI from avoiding words that haven't been seen in a long time.
 
 ---
 
