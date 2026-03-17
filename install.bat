@@ -6,6 +6,10 @@ echo SRS AI Installer
 echo =============================
 echo.
 
+:: create new folder
+if not exist "spaced_repetition_system" mkdir spaced_repetition_system
+cd ./spaced_repetition_system 
+
 :: ---------------------------------
 :: Always download global data files
 :: ---------------------------------

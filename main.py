@@ -16,10 +16,9 @@ import os
 # TODO word cap slider
 # TODO gaussian button
 # TODO change gaussian range
-# TODO delete word (strg q)
-# TODO explore?
 
-# TODO vocab checkup with analysis
+#! test if chosen parameters have enough meaning
+#! program ai part
 
 
 # parameters for dev
@@ -470,11 +469,15 @@ class SRS:
                 pd.DataFrame([word_data]).to_csv("data/feature_data.csv", mode="a", index=False, header=False)
 
             #get new word data
+            time_now = time.time()
+            time_now_scaled = self.scale_time(time_now)
+            time_since_last_seen = time_now_scaled - word_data[1]
+            print(f"time since last seen: {time_since_last_seen}")
             old_ema = word_data[4]
             new_ema = self.get_ema(old_ema=word_data[4], accuracy=correct)
 
             word_data[0] += 1.0 # occurrences in session (will be reset on new session)
-            word_data[1] = round(time.time()/3600 - time_normalization, 4) # last seen (in hours)
+            word_data[1] = time_now_scaled # last seen (in hours)
             word_data[2] = float(self.index) # last seen index
             word_data[3] += 1.0 # n reps
             word_data[4] = new_ema # exponentially moving average of accuracy
@@ -482,6 +485,7 @@ class SRS:
             word_data[6] = word_data[6]+1 if correct == 1.0 else 0.0 # correct streak
             word_data[7] = should_reverse
 
+            self.print_data_tensor(word_data) # print data for debugging
             
             # save new word data in language data
             if should_reverse:
@@ -493,9 +497,17 @@ class SRS:
             
             if usable_for_ai:
                 # save reward resulting from old data
-                pd.DataFrame([new_ema - old_ema]).to_csv("data/reward_data.csv", mode="a", index=False, header=False)
+                pd.DataFrame([self.get_reward(old_ema, new_ema, time_since_last_seen)]).to_csv("data/reward_data.csv", mode="a", index=False, header=False)
 
-            self.print_data_tensor(word_data)
+
+    def scale_time(self, x):
+        return round(x/3600 - time_normalization, 4)
+
+    def get_reward(self, old_ema, new_ema, time_since_last_seen, decay_lambda=0.005):
+        expected_ema = old_ema * math.exp(-decay_lambda * time_since_last_seen)
+        print(f"new ema: {new_ema}")
+        print(f"expected ema: {expected_ema}")
+        return new_ema - expected_ema
 
     def save_sigma_factor(self, selected_sigma_factor):
         global sigma_factor
@@ -786,7 +798,7 @@ class SRS:
         distances = [min([self.word_distance(input_word, word) for word in target_word]) for input_word in input]
         correct = all(input[i] in target_word if len(input[i]) <= 4 else distances[i] <= 1 for i in range(len(input))) and min_input_len <= input_len
 
-        self.print_validation_reason(input, target_word, min_input_len, input_len, distances) 
+        #self.print_validation_reason(input, target_word, min_input_len, input_len, distances) 
 
         return correct
     
