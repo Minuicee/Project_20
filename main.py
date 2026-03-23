@@ -38,7 +38,7 @@ should_reverse = False #init as bool
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
 n_features = 8
 len_timer = 30 
-max_inactive_ticks = 300 #30ticks/second
+max_inactive_ticks = 450 #30ticks/second
     #ai parameters
 reverse_translation = 0 #0 means r.t. impossible, 1 always, everything else is a weight. to let the ai decide 0.5 is standard
 ema_alpha = 0.3
@@ -115,6 +115,53 @@ class SRS:
         self.init_data()
 
         self.trigger_pause()
+
+    def delete_row(self, row_index):
+        row_index -= 1 #account css starting at 0
+        #Delete row at row_index from l1_data, l2_data, language1, and language2
+        files = [
+            f"sets/{self.folder}/l1_data.csv",
+            f"sets/{self.folder}/l2_data.csv",
+            f"sets/{self.folder}/language1.csv",
+            f"sets/{self.folder}/language2.csv",
+        ]
+
+        for path in files:
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            is_csv_with_header = path.endswith("_data.csv")
+
+            if is_csv_with_header:
+                header = lines[0]
+                data_lines = lines[1:]
+                if row_index >= len(data_lines):
+                    print(f"Error: row_index {row_index} out of range in {path}")
+                    return
+                del data_lines[row_index]
+                new_lines = [header] + data_lines
+            else:
+                if row_index >= len(lines):
+                    print(f"Error: row_index {row_index} out of range in {path}")
+                    return
+                del lines[row_index]
+                new_lines = lines
+
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+
+        # Keep in-memory data in sync
+        if row_index < len(self.df1):
+            del self.df1[row_index]
+        if row_index < len(self.df2):
+            del self.df2[row_index]
+        if row_index < len(self.l1):
+            del self.l1[row_index]
+        if row_index < len(self.l2):
+            del self.l2[row_index]
+
+        self.n_words = len(self.l1)
+        print(f"Deleted row {row_index}. Remaining words: {self.n_words}")
 
     def check_os(self):
         # look if linux is used because filedialog doesnt properly work there
