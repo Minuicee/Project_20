@@ -229,8 +229,9 @@ class SRS:
         except FileNotFoundError:
             os.makedirs("user_data", exist_ok=True)
 
-        while self.folder == "":
-            self.prompt_folder()
+        self.prompt_folder()
+        if self.folder == "":
+            pygame.quit()
 
     def prompt_folder(self):
         root = tkinter.Tk()
