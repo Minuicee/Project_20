@@ -15,7 +15,7 @@ import os
 # TODO reverse_translation slider
 # TODO word cap slider
 # TODO gaussian button
-# TODO change gaussian range
+# TODO change gaussian range!!!
 
 #! test if chosen parameters have enough meaning
 #! program ai part
@@ -179,6 +179,7 @@ class SRS:
 
         if not os.path.exists(reward_path):
             pd.DataFrame().to_csv(reward_path, index=False, header=False)
+
 
     def init_set_config(self):
         global min_gauss_weights
@@ -562,11 +563,11 @@ class SRS:
             sigma_factor = selected_sigma_factor
             try:
                 with open(f"sets/{self.folder}/config/sigma_factor.csv", "w", encoding="utf-8") as f:
-                    f.write(str(sigma_factor) + "\n")
+                    f.write(f"{sigma_factor:.4f}".rstrip('0').rstrip('.') + "\n")
             except FileNotFoundError:
                 os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
                 with open(f"sets/{self.folder}/config/sigma_factor.csv", "w", encoding="utf-8") as f:
-                    f.write(str(sigma_factor) + "\n")
+                    f.write(f"{sigma_factor:.4f}".rstrip('0').rstrip('.') + "\n")
 
     def save_min_gauss_weights(self, selected_min_gauss_weights):
         global min_gauss_weights
