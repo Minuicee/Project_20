@@ -6,113 +6,99 @@ echo SRS AI Installer
 echo =============================
 echo.
 
-:: create new folder
+:: Create and enter project folder
 if not exist "spaced_repetition_system" mkdir spaced_repetition_system
-cd ./spaced_repetition_system 
+cd spaced_repetition_system
+if errorlevel 1 (echo Failed to enter project directory & pause & exit /b)
 
 :: ---------------------------------
-:: Always download global data files
+:: Create required directories
 :: ---------------------------------
-if not exist "data" mkdir data
-if not exist "img" mkdir img
+if not exist "data"  mkdir data
+if not exist "img"   mkdir img
+if not exist "sets"  mkdir sets
 
-echo Downloading core data files...
+:: ---------------------------------
+:: Download UI images
+:: ---------------------------------
+echo Downloading core files...
 
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/img/folder_button.png -OutFile img/folder_button.png -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/img/settings_button.png -OutFile img/settings_button.png -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/img/edit_button.png -OutFile img/edit_button.png -ErrorAction SilentlyContinue"
+set BASE=https://raw.githubusercontent.com/Minuicee/Project_20/main
 
+powershell -Command "Invoke-WebRequest -Uri %BASE%/img/folder_button.png   -OutFile img\folder_button.png   -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri %BASE%/img/settings_button.png -OutFile img\settings_button.png -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri %BASE%/img/edit_button.png     -OutFile img\edit_button.png     -ErrorAction SilentlyContinue"
 
 :: ---------------------------------
 :: Ask user for set name
 :: ---------------------------------
 echo.
-echo Enter set name (e.g. template)
-echo Leave empty to use template.
+echo Enter set name (e.g. template). Leave empty to use template.
 echo.
-
 set /p SET_NAME=Set name: 
-
 if "%SET_NAME%"=="" set SET_NAME=template
 
 :: ---------------------------------
-:: Prepare local directory
+:: Download selected set files
 :: ---------------------------------
-if not exist "sets" mkdir sets
+echo Installing set: %SET_NAME%...
+
 if not exist "sets\%SET_NAME%" mkdir sets\%SET_NAME%
 
-echo Installing set: %SET_NAME%
+powershell -Command "Invoke-WebRequest -Uri %BASE%/sets/%SET_NAME%/language1.csv -OutFile sets\%SET_NAME%\language1.csv -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri %BASE%/sets/%SET_NAME%/language2.csv -OutFile sets\%SET_NAME%\language2.csv -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri %BASE%/sets/%SET_NAME%/data/l1_data.csv -OutFile sets\%SET_NAME%\l1_data.csv -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri %BASE%/sets/%SET_NAME%/data/l2_data.csv -OutFile sets\%SET_NAME%\l2_data.csv -ErrorAction SilentlyContinue"
+
+echo Set installed (if it exists on GitHub).
 
 :: ---------------------------------
-:: Try downloading selected set
+:: Check Python installation
 :: ---------------------------------
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/language1.csv -OutFile sets/%SET_NAME%/language1.csv -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/language2.csv -OutFile sets/%SET_NAME%/language2.csv -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/data/l1_data.csv -OutFile sets/%SET_NAME%/data/l1_data.csv -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/sets/%SET_NAME%/data/l2_data.csv -OutFile sets/%SET_NAME%/data/l2_data.csv -ErrorAction SilentlyContinue"
-
-echo set installed (if exists).
-
-:: -------------------------------
-:: Check if Python is installed
-:: -------------------------------
 python --version >nul 2>&1
-IF %ERRORLEVEL% NEQ 0 (
-    echo Python is not installed.
-    pause
-    exit /b
-)
+if errorlevel 1 (echo Python is not installed. & pause & exit /b)
 
-:: -------------------------------
-:: Create / activate virtual environment
-:: -------------------------------
-if not exist "venv" (
-    python -m venv venv
-)
-
+:: ---------------------------------
+:: Create virtual environment
+:: ---------------------------------
+if not exist "venv" python -m venv venv
 call venv\Scripts\activate
 
-:: -------------------------------
-:: Download requirements if missing
-:: -------------------------------
+:: ---------------------------------
+:: Install requirements
+:: ---------------------------------
 if not exist "requirements\requirements.txt" (
     echo requirements.txt not found. Downloading...
     if not exist "requirements" mkdir requirements
-    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/requirements/requirements.txt -OutFile SRS/requirements\requirements.txt"
-
-    echo Installing required packages...
+    powershell -Command "Invoke-WebRequest -Uri %BASE%/requirements/requirements.txt -OutFile requirements\requirements.txt"
+    echo Installing packages...
     pip install --upgrade pip
     pip install -r requirements\requirements.txt
 )
 
+:: ---------------------------------
+:: Update main.py if changed
+:: ---------------------------------
+powershell -Command "Invoke-WebRequest -Uri %BASE%/main.py -OutFile temp_main.py"
 
-:: -------------------------------
-:: Check for new main.py from GitHub
-:: -------------------------------
-set REPO_URL=https://raw.githubusercontent.com/Minuicee/Project_20/main/main.py
-set LOCAL_FILE=main.py
-
-:: Download new file to temp
-powershell -Command "Invoke-WebRequest -Uri %REPO_URL% -OutFile temp_main.py"
-
-:: Compare temp with local
-fc temp_main.py %LOCAL_FILE% >nul
-IF %ERRORLEVEL% NEQ 0 (
+fc temp_main.py main.py >nul 2>&1
+if errorlevel 1 (
     echo New version detected. Updating main.py...
-    move /Y temp_main.py %LOCAL_FILE%
-) ELSE (
+    move /Y temp_main.py main.py
+) else (
     del temp_main.py
 )
 
-:: -------------------------------
-:: Download run_main.bat if missing
-:: -------------------------------
+:: ---------------------------------
+:: Download run.bat if missing
+:: ---------------------------------
 if not exist "run.bat" (
-    echo run.bat not found. Downloading...
-    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/run.bat -OutFile run.bat"
-) ELSE (
+    echo Downloading run.bat...
+    powershell -Command "Invoke-WebRequest -Uri %BASE%/run.bat -OutFile run.bat"
+) else (
     echo run.bat already exists.
 )
 
-
+echo.
+echo Done.
 pause

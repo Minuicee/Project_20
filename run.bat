@@ -1,48 +1,44 @@
 @echo off
 setlocal
 
+set BASE=https://raw.githubusercontent.com/Minuicee/Project_20/main
+
 :: -------------------------------
 :: Activate virtual environment
 :: -------------------------------
-if exist "venv\Scripts\activate.bat" (
-    call venv\Scripts\activate
-) ELSE (
+if not exist "venv\Scripts\activate.bat" (
     echo Virtual environment not found. Please run install.bat first.
     pause
     exit /b
 )
+call venv\Scripts\activate
 
 :: -------------------------------
-:: Download requirements if missing
+:: Install requirements if missing
 :: -------------------------------
 if not exist "requirements\requirements.txt" (
     echo requirements.txt not found. Downloading...
     if not exist "requirements" mkdir requirements
-    powershell -Command "Invoke-WebRequest -Uri https://raw.githubusercontent.com/Minuicee/Project_20/main/requirements/requirements.txt -OutFile requirements\requirements.txt"
-
+    powershell -Command "Invoke-WebRequest -Uri %BASE%/requirements/requirements.txt -OutFile requirements\requirements.txt"
     echo Installing required packages...
     pip install --upgrade pip
     pip install -r requirements\requirements.txt
 )
 
 :: -------------------------------
-:: Ensure main.py exists
+:: Download main.py if missing
 :: -------------------------------
-set REPO_URL=https://raw.githubusercontent.com/Minuicee/Project_20/main/main.py
-set LOCAL_FILE=main.py
-
-if not exist "%LOCAL_FILE%" (
-    echo main.py not found. Downloading from GitHub...
-    powershell -Command "Invoke-WebRequest -Uri %REPO_URL% -OutFile %LOCAL_FILE%"
+if not exist "main.py" (
+    echo main.py not found. Downloading...
+    powershell -Command "Invoke-WebRequest -Uri %BASE%/main.py -OutFile main.py"
 )
 
 :: -------------------------------
-:: Run the main script without terminal
+:: Run without terminal window
 :: -------------------------------
 if exist "venv\Scripts\pythonw.exe" (
-    start "" "venv\Scripts\pythonw.exe" "%LOCAL_FILE%"
+    start "" "venv\Scripts\pythonw.exe" main.py
 ) else (
-    echo python.exe not found in venv.
+    echo pythonw.exe not found in venv.
     pause
 )
-

@@ -509,7 +509,7 @@ class SRS:
             word_data = self.df1[self.current_index] # currently saved data
 
         # only save data if word_data is not the init value
-        usable_for_ai = word_data[3] >= 2
+        usable_for_ai = word_data[3] >= 1
 
         if should_save:
             if usable_for_ai:
