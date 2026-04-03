@@ -47,8 +47,6 @@ if not exist "sets\%SET_NAME%" mkdir sets\%SET_NAME%
 
 powershell -Command "Invoke-WebRequest -Uri %BASE%/sets/%SET_NAME%/language1.csv -OutFile sets\%SET_NAME%\language1.csv -ErrorAction SilentlyContinue"
 powershell -Command "Invoke-WebRequest -Uri %BASE%/sets/%SET_NAME%/language2.csv -OutFile sets\%SET_NAME%\language2.csv -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri %BASE%/sets/%SET_NAME%/data/l1_data.csv -OutFile sets\%SET_NAME%\l1_data.csv -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri %BASE%/sets/%SET_NAME%/data/l2_data.csv -OutFile sets\%SET_NAME%\l2_data.csv -ErrorAction SilentlyContinue"
 
 echo Set installed (if it exists on GitHub).
 

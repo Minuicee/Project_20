@@ -27,7 +27,7 @@ A vocabulary learning app built with **Pygame** that quizzes you on word pairs a
 - Overwrites the CSV line in place
 
 ### Inactivity Pause
-- After 300 ticks (~10 seconds) of no input, the app pauses until a key is pressed
+- After 450 ticks (~15 seconds) of no input, the app pauses until a key is pressed
 
 ---
 
@@ -44,12 +44,11 @@ A vocabulary learning app built with **Pygame** that quizzes you on word pairs a
 4. `time_since_last_seen` — derived from `last_seen` and current time
 5. `delta_index` — difference between `last_seen_index` and current session index
 6. `amount_reps` — total repetitions across all sessions
-7. `is_reversed` — whether the word was shown in reverse direction
 
 **Last reward of word**
-8. `accuracy` — Exponentially Moving Average (EMA) of past accuracy
-9. `last_correct` — correctness score accounting for typing start time
-10. `correct_streak` — current consecutive correct streak
+7. `accuracy` — Exponentially Moving Average (EMA) of past accuracy
+8. `last_correct` — correctness score accounting for typing start time
+9. `correct_streak` — current consecutive correct streak
 
 ---
 
@@ -64,7 +63,7 @@ A vocabulary learning app built with **Pygame** that quizzes you on word pairs a
 | `[4]` | `EMA` | Exponential moving average of accuracy |
 | `[5]` | `last_correct` | Typing-speed-adjusted correctness score |
 | `[6]` | `correct_streak` | Current correct streak |
-| `[7]` | `is_reversed` | Whether word was shown reversed |
+| `[7]` | `previous_word_correct` | If the previous word was correct |
 
 ---
 

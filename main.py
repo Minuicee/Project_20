@@ -17,16 +17,13 @@ import os
 # TODO gaussian button
 # TODO change gaussian range!!!
 
-#! test if chosen parameters have enough meaning
-#! program ai part
-
 
 # parameters for dev
     #gui
 window_scale = 200
 button_scale = 2.5 #divides through button scale
 width_ratio = 6
-height_ratio = 3
+height_ratio = 3        # (copy pasted)
 font_word_ratio = 0.3
 font_input_ratio = 0.2
 border_radius_ratio = 0.06
@@ -34,15 +31,13 @@ gaussian_font_ratio = 0.1
 axis_padding_ratio = 0.05
     #logic
 should_save = True
-should_reverse = False #init as bool
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
-n_features = 8
+n_features = 7
 len_timer = 30 
 max_inactive_ticks = 450 #30ticks/second
     #ai parameters
-reverse_translation = 0 #0 means r.t. impossible, 1 always, everything else is a weight. to let the ai decide 0.5 is standard
 ema_alpha = 0.3
-time_normalization = 492200 #hours
+time_normalization = 493100 #hours
     #standard gauss distribution parameters
 std_sigma_factor = 1.0
 std_min_gauss_weights = 0.0
@@ -64,8 +59,7 @@ feature_columns = [
     "n_reps",
     "EMA_accuracy",
     "last_correct_score",
-    "correct_streak",
-    "is_reversed"
+    "correct_streak"
 ]
 
 
@@ -89,13 +83,11 @@ class SRS:
         self.n_words = 0
         self.editing_step = 0
         self.last_index = -1
-        self.was_reversed = False
         self.ctrl_held = False
         self.is_linux = False
         self.mouse_hold = False
         self.coordinate_click_start_time = 0
-        self.df1 = []
-        self.df2 = []
+        self.df = []
         self.settings_clicked = False
         self.get_new_gaussian = False
         self.ignore_next_button_up = False
@@ -103,6 +95,7 @@ class SRS:
         self.selected_sigma_factor = 0
         self.image_cache = {}
         self.selected_min_gauss_weights = 0
+        self.previous_word_correct = False
 
         self.init_gui(width_ratio * window_scale, height_ratio * window_scale)
 
@@ -118,10 +111,9 @@ class SRS:
 
     def delete_row(self, row_index):
         row_index -= 1 #account css starting at 0
-        #Delete row at row_index from l1_data, l2_data, language1, and language2
+        #Delete row at row_index from data, language1, and language2
         files = [
-            f"sets/{self.folder}/l1_data.csv",
-            f"sets/{self.folder}/l2_data.csv",
+            f"sets/{self.folder}/data.csv",
             f"sets/{self.folder}/language1.csv",
             f"sets/{self.folder}/language2.csv",
         ]
@@ -130,7 +122,7 @@ class SRS:
             with open(path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
 
-            is_csv_with_header = path.endswith("_data.csv")
+            is_csv_with_header = path.endswith(".csv")
 
             if is_csv_with_header:
                 header = lines[0]
@@ -151,10 +143,8 @@ class SRS:
                 f.writelines(new_lines)
 
         # Keep in-memory data in sync
-        if row_index < len(self.df1):
-            del self.df1[row_index]
-        if row_index < len(self.df2):
-            del self.df2[row_index]
+        if row_index < len(self.df):
+            del self.df[row_index]
         if row_index < len(self.l1):
             del self.l1[row_index]
         if row_index < len(self.l2):
@@ -179,7 +169,6 @@ class SRS:
 
         if not os.path.exists(reward_path):
             pd.DataFrame().to_csv(reward_path, index=False, header=False)
-
 
     def init_set_config(self):
         global min_gauss_weights
@@ -395,13 +384,11 @@ class SRS:
                         if event.key == pygame.K_RETURN:
                             if self.input_text != "": #add a second if statement since we want it to do nothing if return is pressed but text is empty
                                 if self.editing_step == 1:
-                                    language_num = 2 if should_reverse else 1
-                                    self.rewrite_line(self.last_index, self.input_text, f"sets/{self.folder}/language{language_num}.csv")
+                                    self.rewrite_line(self.last_index, self.input_text, f"sets/{self.folder}/language1.csv")
                                     self.input_text = self.target[self.last_index]
                                     self.editing_step = 2
                                 elif self.editing_step == 2:
-                                    language_num = 1 if should_reverse else 2
-                                    self.rewrite_line(self.last_index, self.input_text, f"sets/{self.folder}/language{language_num}.csv")
+                                    self.rewrite_line(self.last_index, self.input_text, f"sets/{self.folder}/language2.csv")
                                     self.editing_step = 0
                                     self.input_text = ""
                                 else:
@@ -499,14 +486,10 @@ class SRS:
         with open("user_data/index.csv", "w", encoding="utf-8") as f:
             f.write(str(self.index) + "\n")
 
-
     def save_data(self, correct):
 
         # get old word data
-        if should_reverse:
-            word_data = self.df2[self.current_index] # currently saved data
-        else:
-            word_data = self.df1[self.current_index] # currently saved data
+        word_data = self.df[self.current_index] # currently saved data
 
         # only save data if word_data is not the init value
         usable_for_ai = word_data[3] >= 1
@@ -521,33 +504,31 @@ class SRS:
             time_now = time.time()
             time_now_scaled = self.scale_time(time_now)
             time_since_last_seen = time_now_scaled - word_data[1]
-            print(f"time since last seen: {time_since_last_seen}")
+
+            correct_score = self.account_typing_start_time(correct, (self.typing_start - self.new_index_time), self.previous_word_correct)
             old_ema = word_data[4]
-            new_ema = self.get_ema(old_ema=word_data[4], accuracy=correct)
+            new_ema = self.get_ema(old_ema=word_data[4], accuracy=correct_score)
 
             word_data[0] += 1.0 # occurrences in session (will be reset on new session)
             word_data[1] = time_now_scaled # last seen (in hours)
             word_data[2] = float(self.index) # last seen index
             word_data[3] += 1.0 # n reps
             word_data[4] = new_ema # exponentially moving average of accuracy
-            word_data[5] = self.account_typing_start_time(correct, (self.typing_start - self.new_index_time)) # last correct 
+            word_data[5] = correct_score # last correct 
             word_data[6] = word_data[6]+1 if correct == 1.0 else 0.0 # correct streak
-            word_data[7] = should_reverse
 
             self.print_data_tensor(word_data) # print data for debugging
+
+            # save wheter last word was correct
+            self.previous_word_correct = correct
             
             # save new word data in language data
-            if should_reverse:
-                self.df2[self.current_index] = word_data
-                pd.DataFrame(self.df2).to_csv(f"sets/{self.folder}/l2_data.csv", mode="w", index=False, header=feature_columns)
-            else:
-                self.df1[self.current_index] = word_data
-                pd.DataFrame(self.df1).to_csv(f"sets/{self.folder}/l1_data.csv", mode="w", index=False, header=feature_columns)
+            self.df[self.current_index] = word_data
+            pd.DataFrame(self.df).to_csv(f"sets/{self.folder}/data.csv", mode="w", index=False, header=feature_columns)
             
             if usable_for_ai:
                 # save reward resulting from old data
                 pd.DataFrame([self.get_reward(old_ema, new_ema, time_since_last_seen)]).to_csv("data/reward_data.csv", mode="a", index=False, header=False)
-
 
     def scale_time(self, x):
         return round(x/3600 - time_normalization, 4)
@@ -594,16 +575,17 @@ class SRS:
                 with open(f"sets/{self.folder}/config/focused_area.csv", "w", encoding="utf-8") as f:
                     f.write(str(focused_area) + "\n")            
 
-    def account_typing_start_time(self, correct, typing_start_time):
+    def account_typing_start_time(self, correct, typing_start_time, previous_word_correct):
         # view curve README file
-        return min(1.0, math.exp((-typing_start_time + 1) / 4) * (0.6) + 0.4 if correct else 0.0)
+        val = ((math.exp((-typing_start_time + 1) / 4) * (0.6) + 0.4)+0.1 if not previous_word_correct else math.exp((-typing_start_time + 1) / 4) * (0.6) + 0.4) if correct else 0.0 if correct else 0.0
+        return min(1.0, val)
 
     def get_ema(self, old_ema, accuracy):
         return ema_alpha*accuracy + (1-ema_alpha)*old_ema
 
     def print_data_tensor(self, tensor):
         print()
-        print(f" ---id: {self.current_index} --- ")
+        print(f" ---{self.l1[self.current_index]} (id: {self.current_index})--- ")
         for i in range(len(feature_columns)):
             print(f"{feature_columns[i]}: {tensor[i]}")
 
@@ -614,21 +596,9 @@ class SRS:
         print(f"Word distances: {distance}")
 
     def get_new_index(self):
-        global should_reverse
 
         if self.current_index != -1:
             self.last_index = self.current_index
-            self.was_reversed = should_reverse
-
-        should_reverse = False
-
-        if should_reverse:
-            self.source = self.l2
-            self.target = self.l1
-
-        else:
-            self.source = self.l1
-            self.target = self.l2
 
         # get new index
         self.word_vals = np.random.rand(self.n_words)#! * self.gauss_distribution()
@@ -860,52 +830,27 @@ class SRS:
     def init_data(self):
         # init collected data
         try:
-            self.init_df_tensor(1)
-            if self.n_words != len(self.df1):
+            self.init_df_tensor()
+            if self.n_words != len(self.df):
                 # file doesnt have enough rows ( in case vocab was added later on )
-                rows = [[0.0]*n_features for _ in range(self.n_words - len(self.df1))]
+                rows = [[0.0]*n_features for _ in range(self.n_words - len(self.df))]
                 # asign start bias to ema
                 rows = self.set_row_val(rows, 4, 0.5)
-                pd.DataFrame(rows).to_csv(f"sets/{self.folder}/l1_data.csv", mode="a", index=False, header=False)
-                self.init_df_tensor(1)
+                pd.DataFrame(rows).to_csv(f"sets/{self.folder}/data.csv", mode="a", index=False, header=False)
+                self.init_df_tensor()
 
         except Exception as _:
             # file doesnt exist
             rows = [[0.0]*n_features for _ in range(self.n_words)]
             # asign start bias to ema
             rows = self.set_row_val(rows, 4, 0.5)
-            pd.DataFrame(rows).to_csv(f"sets/{self.folder}/l1_data.csv", mode="a", index=False, header=feature_columns)
-            self.init_df_tensor(1)
+            pd.DataFrame(rows).to_csv(f"sets/{self.folder}/data.csv", mode="a", index=False, header=feature_columns)
+            self.init_df_tensor()
 
-        try:
-            self.init_df_tensor(2)
-            if self.n_words != len(self.df2):
-                # file doesnt have enough rows ( in case vocab was added later on )
-                rows = [[0.0]*n_features for _ in range(self.n_words - len(self.df2))]
-                # asign start bias to ema
-                rows = self.set_row_val(rows, 4, 0.5)
-                pd.DataFrame(rows).to_csv(f"sets/{self.folder}/l2_data.csv", mode="a", index=False, header=False)
-                self.init_df_tensor(2)
-
-        except Exception as _:
-            # file doesnt exist
-            rows = [[0.0]*n_features for _ in range(self.n_words)]
-            # asign start bias to ema
-            rows = self.set_row_val(rows, 4, 0.5)
-            # set should reverse true
-            rows = self.set_row_val(rows, 7, 1.0)
-            pd.DataFrame(rows).to_csv(f"sets/{self.folder}/l2_data.csv", mode="a", index=False, header=feature_columns)
-            self.init_df_tensor(2)
-
-    def init_df_tensor(self, num):
-        if num == 1:
-            df1 = pd.read_csv(f"sets/{self.folder}/l1_data.csv", header=0)
-            # reset occurrences in session and save as self.df
-            self.df1 = self.set_row_val(df1.values.tolist(), 0, 0.0)
-        else:
-            df2 = pd.read_csv(f"sets/{self.folder}/l2_data.csv", header=0)
-            # reset occurrences in session and save as self.df
-            self.df2 = self.set_row_val(df2.values.tolist(), 0, 0.0)
+    def init_df_tensor(self):
+        df = pd.read_csv(f"sets/{self.folder}/data.csv", header=0)
+        # reset occurrences in session and save as self.df
+        self.df = self.set_row_val(df.values.tolist(), 0, 0.0)
 
     def set_row_val(self, df, col, val):
         for row in df:
@@ -914,7 +859,6 @@ class SRS:
     
     def word_distance(self, s1, s2):
         # levensthein word distance
-        # (copy pasted)
         len1, len2 = len(s1), len(s2)
         dp = [[0] * (len2 + 1) for _ in range(len1 + 1)]
         for i in range(len1 + 1): dp[i][0] = i
