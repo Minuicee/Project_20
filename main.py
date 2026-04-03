@@ -50,7 +50,7 @@ min_gauss_weights = std_min_gauss_weights
 min_gauss_weights_min = 0
 min_gauss_weights_range = 0.9
 focused_area = std_focused_area # cant be bigger than word_cap and n_words
-ignore_characters = " '/(),;?!\"\n."
+ignore_characters = " '/(),;?!\"\n.…"
 ignore_words = ["der", "die", "das"] # german articles
 feature_columns = [
     "occurrences_session",
@@ -367,6 +367,10 @@ class SRS:
                         self.trigger_settings_button()
                     elif event.key == pygame.K_e:
                         self.trigger_edit_button()
+                    elif event.key == pygame.K_d:
+                        if self.last_index != -1:
+                            self.delete_row(self.last_index)
+                            self.last_index = -1
                     elif event.key == pygame.K_BACKSPACE:
                         self.input_text = ""
 
@@ -817,7 +821,7 @@ class SRS:
         distances = [min([self.word_distance(input_word, word) for word in target_word]) for input_word in input]
         correct = all(input[i] in target_word if len(input[i]) <= 4 else distances[i] <= 1 for i in range(len(input))) and min_input_len <= input_len
 
-        #self.print_validation_reason(input, target_word, min_input_len, input_len, distances) 
+        self.print_validation_reason(input, target_word, min_input_len, input_len, distances) 
 
         return correct
     
