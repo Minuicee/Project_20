@@ -2,7 +2,7 @@ myenv
 sets/test
 build
 main.spec
-sets/*/data
+sets/*/data.csv
 sets/*/config/*
 data/*
 user_data

@@ -50,7 +50,7 @@ min_gauss_weights = std_min_gauss_weights
 min_gauss_weights_min = 0
 min_gauss_weights_range = 0.9
 focused_area = std_focused_area # cant be bigger than word_cap and n_words
-ignore_characters = " '(),;?!\"\n."
+ignore_characters = " '/(),;?!\"\n."
 ignore_words = ["der", "die", "das"] # german articles
 feature_columns = [
     "occurrences_session",
