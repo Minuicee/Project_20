@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 import pygame
+import matplotlib.pyplot as plt
 
 #standard libraries
 import tkinter
@@ -32,7 +33,6 @@ axis_padding_ratio = 0.05
     #logic
 should_save = True
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
-n_features = 7
 len_timer = 30 
 max_inactive_ticks = 450 #30ticks/second
     #ai parameters
@@ -78,6 +78,7 @@ class SRS:
         self.new_index_time = 0
         self.typing_start = 0
         self.index = 0
+        self.starting_index = 0
         self.input_text = ""
         self.inactive_ticks = 0
         self.n_words = 0
@@ -87,7 +88,7 @@ class SRS:
         self.is_linux = False
         self.mouse_hold = False
         self.coordinate_click_start_time = 0
-        self.df = []
+        self.df = pd.DataFrame()
         self.settings_clicked = False
         self.get_new_gaussian = False
         self.ignore_next_button_up = False
@@ -144,7 +145,7 @@ class SRS:
 
         # Keep in-memory data in sync
         if row_index < len(self.df):
-            del self.df[row_index]
+            self.df = self.df.drop(index=row_index).reset_index(drop=True)
         if row_index < len(self.l1):
             del self.l1[row_index]
         if row_index < len(self.l2):
@@ -214,6 +215,7 @@ class SRS:
             with open("user_data/index.csv", "r", encoding="utf-8") as f:
                 line = f.readline().strip()
                 self.index = int(line)
+                self.starting_index = self.index
 
         except FileNotFoundError:
             os.makedirs("user_data", exist_ok=True)
@@ -367,6 +369,8 @@ class SRS:
                         self.trigger_settings_button()
                     elif event.key == pygame.K_e:
                         self.trigger_edit_button()
+                    elif event.key == pygame.K_p:
+                        self.plot_df()
                     elif event.key == pygame.K_d:
                         if self.last_index != -1:
                             self.delete_row(self.last_index)
@@ -493,10 +497,10 @@ class SRS:
     def save_data(self, correct):
 
         # get old word data
-        word_data = self.df[self.current_index] # currently saved data
+        word_data = self.df.iloc[self.current_index] # currently saved data
 
         # only save data if word_data is not the init value
-        usable_for_ai = word_data[3] >= 1
+        usable_for_ai = word_data.iloc[3] >= 1
 
         if should_save:
             if usable_for_ai:
@@ -507,19 +511,19 @@ class SRS:
             #get new word data
             time_now = time.time()
             time_now_scaled = self.scale_time(time_now)
-            time_since_last_seen = time_now_scaled - word_data[1]
+            time_since_last_seen = time_now_scaled - word_data.iloc[1]
 
             correct_score = self.account_typing_start_time(correct, (self.typing_start - self.new_index_time), self.previous_word_correct)
-            old_ema = word_data[4]
-            new_ema = self.get_ema(old_ema=word_data[4], accuracy=correct_score)
+            old_ema = word_data.iloc[4]
+            new_ema = self.get_ema(old_ema=word_data.iloc[4], accuracy=correct_score)
 
-            word_data[0] += 1.0 # occurrences in session (will be reset on new session)
-            word_data[1] = time_now_scaled # last seen (in hours)
-            word_data[2] = float(self.index) # last seen index
-            word_data[3] += 1.0 # n reps
-            word_data[4] = new_ema # exponentially moving average of accuracy
-            word_data[5] = correct_score # last correct 
-            word_data[6] = word_data[6]+1 if correct == 1.0 else 0.0 # correct streak
+            word_data.iloc[0] += 1.0 # occurrences in session (will be reset on new session)
+            word_data.iloc[1] = time_now_scaled # last seen (in hours)
+            word_data.iloc[2] = float(self.index) # last seen index
+            word_data.iloc[3] += 1.0 # n reps
+            word_data.iloc[4] = new_ema # exponentially moving average of accuracy
+            word_data.iloc[5] = correct_score # last correct 
+            word_data.iloc[6] = word_data.iloc[6]+1 if correct == 1.0 else 0.0 # correct streak
 
             self.print_data_tensor(word_data) # print data for debugging
 
@@ -527,7 +531,7 @@ class SRS:
             self.previous_word_correct = correct
             
             # save new word data in language data
-            self.df[self.current_index] = word_data
+            self.df.iloc[self.current_index] = word_data
             pd.DataFrame(self.df).to_csv(f"sets/{self.folder}/data.csv", mode="w", index=False, header=feature_columns)
             
             if usable_for_ai:
@@ -587,11 +591,11 @@ class SRS:
     def get_ema(self, old_ema, accuracy):
         return ema_alpha*accuracy + (1-ema_alpha)*old_ema
 
-    def print_data_tensor(self, tensor):
+    def print_data_tensor(self, tensor : pd.DataFrame):
         print()
         print(f" ---{self.l1[self.current_index]} (id: {self.current_index})--- ")
         for i in range(len(feature_columns)):
-            print(f"{feature_columns[i]}: {tensor[i]}")
+            print(f"{feature_columns[i]}: {tensor.iloc[i]}")
 
     def print_validation_reason(self, input, target, min_input_len, input_len, distance):
         print()
@@ -606,10 +610,20 @@ class SRS:
 
         # get new index
         self.word_vals = np.random.rand(self.n_words)#! * self.gauss_distribution()
-        self.current_index = np.argmax(self.word_vals)
+        self.current_index = int(np.argmax(self.word_vals))
 
         self.new_index_time = time.time()
         self.check_typing_start = True
+
+    def use_forward(self):
+
+        normalized_df = self.get_normalized_df()
+
+    def get_normalized_df(self):
+
+        normalized_df = np.zeros((len(self.df), 7))
+
+        #!normalized_df[0] = 
 
     def draw(self):
         if not self.settings_clicked:
@@ -837,7 +851,7 @@ class SRS:
             self.init_df_tensor()
             if self.n_words != len(self.df):
                 # file doesnt have enough rows ( in case vocab was added later on )
-                rows = [[0.0]*n_features for _ in range(self.n_words - len(self.df))]
+                rows = pd.DataFrame([[0.0]*len(feature_columns) for _ in range(self.n_words - len(self.df))])
                 # asign start bias to ema
                 rows = self.set_row_val(rows, 4, 0.5)
                 pd.DataFrame(rows).to_csv(f"sets/{self.folder}/data.csv", mode="a", index=False, header=False)
@@ -845,7 +859,7 @@ class SRS:
 
         except Exception as _:
             # file doesnt exist
-            rows = [[0.0]*n_features for _ in range(self.n_words)]
+            rows = [[0.0]*len(feature_columns) for _ in range(self.n_words)]
             # asign start bias to ema
             rows = self.set_row_val(rows, 4, 0.5)
             pd.DataFrame(rows).to_csv(f"sets/{self.folder}/data.csv", mode="a", index=False, header=feature_columns)
@@ -854,11 +868,12 @@ class SRS:
     def init_df_tensor(self):
         df = pd.read_csv(f"sets/{self.folder}/data.csv", header=0)
         # reset occurrences in session and save as self.df
-        self.df = self.set_row_val(df.values.tolist(), 0, 0.0)
+        self.df = self.set_row_val(df, 0, 0.0)
 
-    def set_row_val(self, df, col, val):
-        for row in df:
-            row[col] = val
+    def set_row_val(self, df: pd.DataFrame, col, val):
+        df.iloc[:, col] = val
+        if not isinstance(col, pd.DataFrame):
+            df = pd.DataFrame(df)
         return df
     
     def word_distance(self, s1, s2):
@@ -887,6 +902,10 @@ class SRS:
             weights.append(val)
         return weights
 
+    def plot_df(self):
+        self.df.hist(figsize=(12,8))
+        plt.show()
+    
 # run main
 if __name__ == "__main__":
     application = SRS()

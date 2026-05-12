@@ -35,17 +35,21 @@ A vocabulary learning app built with **Pygame** that quizzes you on word pairs a
 
 ### Inputs for the AI
 
-**Session data**
+
+### Session data
+
 1. `items_session` — total items answered this session
 2. `time_session` — time elapsed since session start
 
-**Word data**
+### Word data
+
 3. `occurrences_session` — how many times this word appeared this session
 4. `time_since_last_seen` — derived from `last_seen` and current time
 5. `delta_index` — difference between `last_seen_index` and current session index
 6. `amount_reps` — total repetitions across all sessions
 
-**Last reward of word**
+### Last reward of word
+
 7. `accuracy` — Exponentially Moving Average (EMA) of past accuracy
 8. `last_correct` — correctness score accounting for typing start time
 9. `correct_streak` — current consecutive correct streak
@@ -63,7 +67,6 @@ A vocabulary learning app built with **Pygame** that quizzes you on word pairs a
 | `[4]` | `EMA` | Exponential moving average of accuracy |
 | `[5]` | `last_correct` | Typing-speed-adjusted correctness score |
 | `[6]` | `correct_streak` | Current correct streak |
-| `[7]` | `previous_word_correct` | If the previous word was correct |
 
 ---
 

@@ -1,10 +1,22 @@
 import torch
-import math
+import torch.nn as nn
 
-# ki muss auf lange sicht wie schach ki rechnen mit vals:
-# paar schritte random generieren und vorraus schauen
 
-class ai:
+class ai(nn.Module):
 
-    def __init__(self):
-        pass
+    def __init__(self, input_dim):
+        super().__init__()
+
+        # init nn
+        self.network = nn.Sequential(
+            nn.Linear(input_dim, 32),
+            nn.ReLU(),
+            nn.Linear(32, 16),
+            nn.ReLU(),
+            nn.Linear(16, 1),
+            nn.Sigmoid()
+        )
+    
+    def forward(self, x):
+        self.network(x)
+
