@@ -591,7 +591,7 @@ class SRS:
     def get_ema(self, old_ema, accuracy):
         return ema_alpha*accuracy + (1-ema_alpha)*old_ema
 
-    def print_data_tensor(self, tensor : pd.DataFrame):
+    def print_data_tensor(self, tensor : pd.Series):
         print()
         print(f" ---{self.l1[self.current_index]} (id: {self.current_index})--- ")
         for i in range(len(feature_columns)):
@@ -859,7 +859,7 @@ class SRS:
 
         except Exception as _:
             # file doesnt exist
-            rows = [[0.0]*len(feature_columns) for _ in range(self.n_words)]
+            rows = pd.DataFrame([[0.0]*len(feature_columns) for _ in range(self.n_words)])
             # asign start bias to ema
             rows = self.set_row_val(rows, 4, 0.5)
             pd.DataFrame(rows).to_csv(f"sets/{self.folder}/data.csv", mode="a", index=False, header=feature_columns)
