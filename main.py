@@ -13,10 +13,16 @@ import math
 import sys
 import os
 
-# TODO reverse_translation slider
 # TODO word cap slider
 # TODO gaussian button
 # TODO change gaussian range!!!
+# TODO intervall timer
+
+# TODO delete word
+# TODO go through words ( to edit)
+# TODO mode: go through all once
+# TODO button to express uncertainty
+
 
 
 # parameters for dev
@@ -376,7 +382,7 @@ class SRS:
                             self.delete_row(self.last_index)
                             self.last_index = -1
                     elif event.key == pygame.K_BACKSPACE:
-                        self.input_text = ""
+                        self.input_text = "" if self.input_text == "" else str(self.input_text.split()[:-1]) #!!!!!!!!!! fix
 
                 if not self.settings_clicked:
                     found_keydown = True
