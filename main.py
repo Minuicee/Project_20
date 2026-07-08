@@ -2,7 +2,6 @@
 import pandas as pd
 import numpy as np
 import pygame
-import matplotlib.pyplot as plt
 
 #standard libraries
 import tkinter
@@ -22,7 +21,7 @@ import os
 # TODO go through words ( to edit)
 # TODO mode: go through all once
 # TODO button to express uncertainty
-
+# TODO dont start file explorer if not needed
 
 
 # parameters for dev
@@ -56,7 +55,7 @@ min_gauss_weights = std_min_gauss_weights
 min_gauss_weights_min = 0
 min_gauss_weights_range = 0.9
 focused_area = std_focused_area # cant be bigger than word_cap and n_words
-ignore_characters = " '/(),;?!\"\n.…"
+ignore_characters = " \x08'/(),;?!\"\n.…"
 ignore_words = ["der", "die", "das"] # german articles
 feature_columns = [
     "occurrences_session",
@@ -382,7 +381,7 @@ class SRS:
                             self.delete_row(self.last_index)
                             self.last_index = -1
                     elif event.key == pygame.K_BACKSPACE:
-                        self.input_text = "" if self.input_text == "" else str(self.input_text.split()[:-1]) #!!!!!!!!!! fix
+                        self.input_text = "" if self.input_text == "" else " ".join(self.input_text.split()[:-1])
 
                 if not self.settings_clicked:
                     found_keydown = True
@@ -408,7 +407,9 @@ class SRS:
                                 else:
                                     self.check_input()
                         elif event.key == pygame.K_BACKSPACE:
-                            self.input_text = self.input_text[:-1]
+                            # add a seperate if statement so backspace character is not printed in the input text
+                            if not self.ctrl_held:
+                                self.input_text = self.input_text[:-1]
                         else:
                             if self.check_typing_start:
                                 self.typing_start = time.time()
