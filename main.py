@@ -12,16 +12,10 @@ import math
 import sys
 import os
 
-# TODO word cap slider
+# TODO word cap prompt
 # TODO gaussian button
 # TODO change gaussian range!!!
 # TODO intervall timer
-
-# TODO delete word
-# TODO go through words ( to edit)
-# TODO mode: go through all once
-# TODO button to express uncertainty
-# TODO dont start file explorer if not needed
 
 
 # parameters for dev
@@ -32,9 +26,11 @@ width_ratio = 6
 height_ratio = 3        # (copy pasted)
 font_word_ratio = 0.3
 font_input_ratio = 0.2
-border_radius_ratio = 0.06
+border_radius_ratio = 0.1 
 gaussian_font_ratio = 0.1
 axis_padding_ratio = 0.05
+button_padding = 0.45
+first_button_padding = 0.05
     #logic
 should_save = True
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
@@ -97,6 +93,7 @@ class SRS:
         self.settings_clicked = False
         self.get_new_gaussian = False
         self.ignore_next_button_up = False
+        self.ignore_ai = False
         self.selected_focused_area = 0
         self.selected_sigma_factor = 0
         self.image_cache = {}
@@ -225,7 +222,9 @@ class SRS:
         except FileNotFoundError:
             os.makedirs("user_data", exist_ok=True)
 
-        self.prompt_folder()
+        if self.folder == "":
+            self.prompt_folder()
+        # if no folder is found again, quit
         if self.folder == "":
             pygame.quit()
 
@@ -308,9 +307,10 @@ class SRS:
         self.gaussian_font = pygame.font.SysFont("calibri", int(gaussian_font_ratio*window_scale))
 
         # Buttons in order
-        self.folder_button = pygame.Rect(0.05*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.settings_button = pygame.Rect(0.55*window_scale,0.05*window_scale,self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.edit_button = pygame.Rect(1.05*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.folder_button = pygame.Rect((first_button_padding)*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.edit_button = pygame.Rect((1*button_padding+first_button_padding)*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.settings_button = pygame.Rect((2*button_padding+first_button_padding)*window_scale, 0.05*window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.loop_button = pygame.Rect((3*button_padding+first_button_padding)*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
         self.coordinate_system_rect = pygame.Rect(self.WIDTH // 7, self.HEIGHT // 5, self.WIDTH * 7 // 10, self.HEIGHT * 7 // 10)
 
         # colours
@@ -356,6 +356,7 @@ class SRS:
         self.settings_button_hover = self.settings_button.collidepoint(mouse_pos)
         self.folder_button_hover = self.folder_button.collidepoint(mouse_pos)
         self.edit_button_hover = self.edit_button.collidepoint(mouse_pos)
+        self.loop_button_hover = self.loop_button.collidepoint(mouse_pos)
         self.coordinate_system_hover = mouse_pos if self.coordinate_system_rect.collidepoint(mouse_pos) else None
 
         for event in pygame.event.get():
@@ -374,6 +375,10 @@ class SRS:
                         self.trigger_settings_button()
                     elif event.key == pygame.K_e:
                         self.trigger_edit_button()
+                    elif event.key == pygame.K_s:
+                        self.trigger_pause()
+                    elif event.key == pygame.K_l:
+                        self.trigger_loop_button()
                     elif event.key == pygame.K_p:
                         self.plot_df()
                     elif event.key == pygame.K_d:
@@ -426,6 +431,9 @@ class SRS:
 
                 elif self.edit_button_hover and not self.last_index == -1:
                     self.trigger_edit_button()
+
+                elif self.loop_button_hover:
+                    self.trigger_loop_button()
                     
                 elif self.coordinate_system_hover:
                     self.coordinate_click_start_time = time.time()
@@ -476,6 +484,13 @@ class SRS:
             self.trigger_pause()
             self.input_text = self.source[self.last_index]
             self.editing_step = 1
+
+    def trigger_loop_button(self):
+        if self.ignore_ai:
+            self.ignore_ai = False
+        else:
+            self.ignore_ai = True
+        self.trigger_pause()
 
     def trigger_pause(self):
         self.input_text = ""
@@ -616,7 +631,10 @@ class SRS:
             self.last_index = self.current_index
 
         # get new index
-        self.word_vals = np.random.rand(self.n_words)#! * self.gauss_distribution()
+        if not self.ignore_ai:
+            self.word_vals = np.random.rand(self.n_words)#! * self.gauss_distribution()
+        else:  #!!!! fix 
+            self.word_vals = self.index % self.n_words * np.ones(self.n_words) # ignore ai and go through words in order
         self.current_index = int(np.argmax(self.word_vals))
 
         self.new_index_time = time.time()
@@ -624,7 +642,7 @@ class SRS:
 
     def use_forward(self):
 
-        normalized_df = self.get_normalized_df()
+        normalized_df = self.get_normalized_df() #!
 
     def get_normalized_df(self):
 
@@ -733,6 +751,9 @@ class SRS:
 
         # edit prev word
         self.draw_button(self.edit_button, self.edit_button_hover, False, image="edit_button.png")
+
+        # loop through words
+        self.draw_button(self.loop_button, self.loop_button_hover, self.ignore_ai, image="loop_button.png")
 
     def rewrite_line(self, line, replacement, file):
         with open(file, "r", encoding="utf-8") as f:
