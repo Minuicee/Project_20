@@ -633,22 +633,34 @@ class SRS:
         # get new index
         if not self.ignore_ai:
             self.word_vals = np.random.rand(self.n_words)#! * self.gauss_distribution()
-        else:  #!!!! fix 
-            self.word_vals = self.index % self.n_words * np.ones(self.n_words) # ignore ai and go through words in order
-        self.current_index = int(np.argmax(self.word_vals))
+            self.current_index = int(np.argmax(self.word_vals))
+        else:  
+            self.current_index = self.index % self.n_words # ignore ai and go through words in order
 
         self.new_index_time = time.time()
         self.check_typing_start = True
 
     def use_forward(self):
 
-        normalized_df = self.get_normalized_df() #!
+        normalized_df = self.get_normalized_df() 
 
-    def get_normalized_df(self):
+    def get_normalized_df(self, df=None): 
+        df = self.df if df is None else df
+        normalized_df = np.zeros((len(df), 7))
 
-        normalized_df = np.zeros((len(self.df), 7))
+        normalized_df[0] = self.log_and_normalize(df["occurrences_session"])
+        normalized_df[1] = self.log_and_normalize(df["last_seen"]) #!!!! cant use that
+        normalized_df[2] = self.log_and_normalize(self.index - df["last_seen_index"]) #!! review feature data
+        normalized_df[3] = self.log_and_normalize(df["n_reps"])
+        normalized_df[4] = df["EMA_accuracy"].values - 0.5 #because accuracy is always between 0 and 1, we can just subtract 0.5 to center it around 0
+        normalized_df[5] = df["last_correct_score"].values - 0.5 #same as above
+        normalized_df[6] = self.log_and_normalize(df["correct_streak"])
 
-        #!normalized_df[0] = 
+        return normalized_df
+
+    def log_and_normalize(self, x):
+        log = np.log1p(x)
+        return (log - np.mean(log)) / np.std(log)
 
     def draw(self):
         if not self.settings_clicked:
@@ -930,9 +942,9 @@ class SRS:
             weights.append(val)
         return weights
 
-    def plot_df(self):
-        self.df.hist(figsize=(12,8))
-        plt.show()
+    # def plot_df(self): cant use this because matplotlib is not required
+    #     self.df.hist(figsize=(12,8))
+    #     plt.show()
     
 # run main
 if __name__ == "__main__":
