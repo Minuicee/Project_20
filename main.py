@@ -60,8 +60,12 @@ feature_columns = [
     "n_reps",
     "EMA_accuracy",
     "last_correct_score",
-    "correct_streak"
-]
+    "correct_streak",
+    "current_time",
+    "current_index",
+    "index_since_start",
+    "time_since_start"
+    ]
 
 
 class SRS:
@@ -80,6 +84,7 @@ class SRS:
         self.typing_start = 0
         self.index = 0
         self.starting_index = 0
+        self.starting_time = 0
         self.input_text = ""
         self.inactive_ticks = 0
         self.n_words = 0
@@ -218,6 +223,7 @@ class SRS:
                 line = f.readline().strip()
                 self.index = int(line)
                 self.starting_index = self.index
+                self.starting_time = time.time()
 
         except FileNotFoundError:
             os.makedirs("user_data", exist_ok=True)
@@ -533,19 +539,24 @@ class SRS:
             #get new word data
             time_now = time.time()
             time_now_scaled = self.scale_time(time_now)
-            time_since_last_seen = time_now_scaled - word_data.iloc[1]
+            time_since_last_seen = time_now_scaled - word_data.iloc[7]
 
             correct_score = self.account_typing_start_time(correct, (self.typing_start - self.new_index_time), self.previous_word_correct)
             old_ema = word_data.iloc[4]
             new_ema = self.get_ema(old_ema=word_data.iloc[4], accuracy=correct_score)
 
             word_data.iloc[0] += 1.0 # occurrences in session (will be reset on new session)
-            word_data.iloc[1] = time_now_scaled # last seen (in hours)
-            word_data.iloc[2] = float(self.index) # last seen index
+            word_data.iloc[1] = time_since_last_seen # last seen (in hours)
+            word_data.iloc[2] = float(self.index - word_data.iloc[8]) # last seen index
             word_data.iloc[3] += 1.0 # n reps
             word_data.iloc[4] = new_ema # exponentially moving average of accuracy
             word_data.iloc[5] = correct_score # last correct 
             word_data.iloc[6] = word_data.iloc[6]+1 if correct == 1.0 else 0.0 # correct streak
+            word_data.iloc[7] = time_now_scaled # current time (in hours)
+            word_data.iloc[8] = float(self.index) # current index
+            word_data.iloc[9] = self.index - self.starting_index # current index since start of session
+            word_data.iloc[10] = time_now_scaled - self.starting_time # current time since start of session (in hours)
+
 
             self.print_data_tensor(word_data) # print data for debugging
 
@@ -560,12 +571,26 @@ class SRS:
                 # save reward resulting from old data
                 pd.DataFrame([self.get_reward(old_ema, new_ema, time_since_last_seen)]).to_csv("data/reward_data.csv", mode="a", index=False, header=False)
 
+    def get_normalized_df(self, df=None, is_training=True): #! test both cases
+        df = self.df if df is None else df
+        normalized_df = np.zeros((len(df), 9))
+
+        normalized_df[0] = self.log_and_normalize(df[0]) # occurrences in session
+        normalized_df[1] = self.log_and_normalize(df[1] if is_training else self.scale_time(time.time()) - df[7]) # time since last seen: either use finished datapoint (for training) or use saved data to make a new one
+        normalized_df[2] = self.log_and_normalize(df[2] if is_training else self.index - df[8]) # index since last seen: same as above
+        normalized_df[3] = self.log_and_normalize(df[3]) # n_reps
+        normalized_df[4] = df[4] - 0.5 # ema:because accuracy is always between 0 and 1, we can just subtract 0.5 to center it around 0
+        normalized_df[5] = df[5] - 0.5 # last correct score: same as above
+        normalized_df[6] = self.log_and_normalize(df[6]) # correct streak
+        normalized_df[7] = self.log_and_normalize(df[9] if is_training else self.scale_time(time.time()) - self.starting_time) # time since start of session
+        normalized_df[8] = self.log_and_normalize(df[10] if is_training else self.index - self.starting_index) # index since start of session
+        return normalized_df
+
     def scale_time(self, x):
         return round(x/3600 - time_normalization, 4)
 
     def get_reward(self, old_ema, new_ema, time_since_last_seen, decay_lambda=0.005):
         expected_ema = old_ema * math.exp(-decay_lambda * time_since_last_seen)
-        print(f"new ema: {new_ema}")
         print(f"expected ema: {expected_ema}")
         return new_ema - expected_ema
 
@@ -642,21 +667,7 @@ class SRS:
 
     def use_forward(self):
 
-        normalized_df = self.get_normalized_df() 
-
-    def get_normalized_df(self, df=None): 
-        df = self.df if df is None else df
-        normalized_df = np.zeros((len(df), 7))
-
-        normalized_df[0] = self.log_and_normalize(df["occurrences_session"])
-        normalized_df[1] = self.log_and_normalize(df["last_seen"]) #!!!! cant use that
-        normalized_df[2] = self.log_and_normalize(self.index - df["last_seen_index"]) #!! review feature data
-        normalized_df[3] = self.log_and_normalize(df["n_reps"])
-        normalized_df[4] = df["EMA_accuracy"].values - 0.5 #because accuracy is always between 0 and 1, we can just subtract 0.5 to center it around 0
-        normalized_df[5] = df["last_correct_score"].values - 0.5 #same as above
-        normalized_df[6] = self.log_and_normalize(df["correct_streak"])
-
-        return normalized_df
+        normalized_df = self.get_normalized_df() #!
 
     def log_and_normalize(self, x):
         log = np.log1p(x)
@@ -942,9 +953,6 @@ class SRS:
             weights.append(val)
         return weights
 
-    # def plot_df(self): cant use this because matplotlib is not required
-    #     self.df.hist(figsize=(12,8))
-    #     plt.show()
     
 # run main
 if __name__ == "__main__":
