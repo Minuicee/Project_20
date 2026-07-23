@@ -46,6 +46,7 @@ class ai(nn.Module): #TODO add training mode: every x words train the model
         feature_data = main.get_normalized_df(self, feature_data, is_training=True) # normalize the data
         self.x_data = torch.tensor(feature_data, dtype=torch.float32)
         self.y_data = torch.tensor(pd.read_csv("data/reward_data.csv").values, dtype=torch.float32)
+        
     def plot_df(self):
         self.df.hist(figsize=(12,8))
         plt.show()

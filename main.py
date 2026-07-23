@@ -16,6 +16,7 @@ import os
 # TODO gaussian button
 # TODO change gaussian range!!!
 # TODO intervall timer
+# TODO remove loop button
 
 
 # parameters for dev
@@ -38,7 +39,7 @@ len_timer = 30
 max_inactive_ticks = 450 #30ticks/second
     #ai parameters
 ema_alpha = 0.3
-time_normalization = 493100 #hours
+time_normalization = 495000 #hours
     #standard gauss distribution parameters
 std_sigma_factor = 1.0
 std_min_gauss_weights = 0.0
@@ -51,7 +52,7 @@ min_gauss_weights = std_min_gauss_weights
 min_gauss_weights_min = 0
 min_gauss_weights_range = 0.9
 focused_area = std_focused_area # cant be bigger than word_cap and n_words
-ignore_characters = " \x08'/(),;?!\"\n.…"
+ignore_characters = " \x08'/(),-;?!\"\n.…"
 ignore_words = ["der", "die", "das"] # german articles
 feature_columns = [
     "occurrences_session",
@@ -63,8 +64,8 @@ feature_columns = [
     "correct_streak",
     "current_time",
     "current_index",
-    "index_since_start",
-    "time_since_start"
+    "time_since_start",
+    "index_since_start"
     ]
 
 
@@ -223,7 +224,7 @@ class SRS:
                 line = f.readline().strip()
                 self.index = int(line)
                 self.starting_index = self.index
-                self.starting_time = time.time()
+                self.starting_time = self.get_scaled_time()
 
         except FileNotFoundError:
             os.makedirs("user_data", exist_ok=True)
@@ -528,7 +529,7 @@ class SRS:
         word_data = self.df.iloc[self.current_index] # currently saved data
 
         # only save data if word_data is not the init value
-        usable_for_ai = word_data.iloc[3] >= 1
+        usable_for_ai = word_data.iloc[3] > 1
 
         if should_save:
             if usable_for_ai:
@@ -554,10 +555,9 @@ class SRS:
             word_data.iloc[6] = word_data.iloc[6]+1 if correct == 1.0 else 0.0 # correct streak
             word_data.iloc[7] = time_now_scaled # current time (in hours)
             word_data.iloc[8] = float(self.index) # current index
-            word_data.iloc[9] = self.index - self.starting_index # current index since start of session
-            word_data.iloc[10] = time_now_scaled - self.starting_time # current time since start of session (in hours)
-
-
+            word_data.iloc[9] = time_now_scaled - self.starting_time # current time since start of session (in hours)
+            word_data.iloc[10] = self.index - self.starting_index # current index since start of session
+        
             self.print_data_tensor(word_data) # print data for debugging
 
             # save wheter last word was correct
@@ -565,27 +565,40 @@ class SRS:
             
             # save new word data in language data
             self.df.iloc[self.current_index] = word_data
+            print(self.get_normalized_df()[self.current_index]) #!
             pd.DataFrame(self.df).to_csv(f"sets/{self.folder}/data.csv", mode="w", index=False, header=feature_columns)
             
             if usable_for_ai:
                 # save reward resulting from old data
                 pd.DataFrame([self.get_reward(old_ema, new_ema, time_since_last_seen)]).to_csv("data/reward_data.csv", mode="a", index=False, header=False)
 
-    def get_normalized_df(self, df=None, is_training=True): #! test both cases
+    def get_normalized_df(self, df=None, is_training=True): #! test both cases !!!FIXX
         df = self.df if df is None else df
         normalized_df = np.zeros((len(df), 9))
 
-        normalized_df[0] = self.log_and_normalize(df[0]) # occurrences in session
-        normalized_df[1] = self.log_and_normalize(df[1] if is_training else self.scale_time(time.time()) - df[7]) # time since last seen: either use finished datapoint (for training) or use saved data to make a new one
-        normalized_df[2] = self.log_and_normalize(df[2] if is_training else self.index - df[8]) # index since last seen: same as above
-        normalized_df[3] = self.log_and_normalize(df[3]) # n_reps
-        normalized_df[4] = df[4] - 0.5 # ema:because accuracy is always between 0 and 1, we can just subtract 0.5 to center it around 0
-        normalized_df[5] = df[5] - 0.5 # last correct score: same as above
-        normalized_df[6] = self.log_and_normalize(df[6]) # correct streak
-        normalized_df[7] = self.log_and_normalize(df[9] if is_training else self.scale_time(time.time()) - self.starting_time) # time since start of session
-        normalized_df[8] = self.log_and_normalize(df[10] if is_training else self.index - self.starting_index) # index since start of session
+        # get non updated rows (use n_reps as reference)
+        mask = df.iloc[:, 3] == 0
+
+        normalized_df[:, 0] = self.log_and_normalize(df.iloc[:, 0]) # occurrences in session
+        normalized_df[:, 1] = self.log_and_normalize(df.iloc[:, 1] if is_training else self.get_scaled_time() - df.iloc[:, 7]) # time since last seen: either use finished datapoint (for training) or use saved data to make a new one
+        normalized_df[:, 2] = self.log_and_normalize(df.iloc[:, 2] if is_training else self.index - df.iloc[:, 8]) # index since last seen: same as above
+        normalized_df[:, 3] = self.log_and_normalize(df.iloc[:, 3]) # n_reps
+        normalized_df[:, 4] = self.normalize(df.iloc[:, 4]) # ema:because accuracy is always between 0 and 1, we can just subtract 0.5 to center it around 0
+        normalized_df[:, 5] = self.normalize(df.iloc[:, 5]) # last correct score: same as above
+        normalized_df[:, 6] = self.log_and_normalize(df.iloc[:, 6]) # correct streak
+        normalized_df[:, 7] = self.log_and_normalize(df.iloc[:, 9] if is_training else self.get_scaled_time() - self.starting_time) # time since start of session
+        normalized_df[:, 8] = self.log_and_normalize(df.iloc[:, 10] if is_training else self.index - self.starting_index) # index since start of session
+
+        normalized_df[mask] = 0 # set non updated rows to 0
+
         return normalized_df
 
+    def normalize(self, x):
+        return x - 0.5
+
+    def get_scaled_time(self):
+        return self.scale_time(time.time())
+    
     def scale_time(self, x):
         return round(x/3600 - time_normalization, 4)
 
@@ -644,6 +657,7 @@ class SRS:
         for i in range(len(feature_columns)):
             print(f"{feature_columns[i]}: {tensor.iloc[i]}")
 
+
     def print_validation_reason(self, input, target, min_input_len, input_len, distance):
         print()
         print(f"All words ({list(input)}) are in target ({list(target)}): {all(word in target for word in input)}")
@@ -671,7 +685,7 @@ class SRS:
 
     def log_and_normalize(self, x):
         log = np.log1p(x)
-        return (log - np.mean(log)) / np.std(log)
+        return (log - np.mean(log)) / np.std(log) if np.std(log) != 0 else log
 
     def draw(self):
         if not self.settings_clicked:

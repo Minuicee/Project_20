@@ -28,6 +28,8 @@ set BASE=https://raw.githubusercontent.com/Minuicee/Project_20/main
 powershell -Command "Invoke-WebRequest -Uri %BASE%/img/folder_button.png   -OutFile img\folder_button.png   -ErrorAction SilentlyContinue"
 powershell -Command "Invoke-WebRequest -Uri %BASE%/img/settings_button.png -OutFile img\settings_button.png -ErrorAction SilentlyContinue"
 powershell -Command "Invoke-WebRequest -Uri %BASE%/img/edit_button.png     -OutFile img\edit_button.png     -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri %BASE%/img/loop_button.png     -OutFile img\loop_button.png     -ErrorAction SilentlyContinue"
+
 
 :: ---------------------------------
 :: Ask user for set name
