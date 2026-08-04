@@ -18,8 +18,13 @@ import os
 # TODO intervall timer
 # TODO remove loop button
 
+#! add feature for session last correct etc if needed
 
 # parameters for dev
+    #print
+print_normalized_df = True
+print_validation = False
+print_data_tensor = False
     #gui
 window_scale = 200
 button_scale = 2.5 #divides through button scale
@@ -67,6 +72,17 @@ feature_columns = [
     "time_since_start",
     "index_since_start"
     ]
+ai_input_columns =  [
+    "occurrences_session",
+    "last_seen",
+    "last_seen_index",
+    "n_reps",
+    "EMA_accuracy",
+    "last_correct_score",
+    "correct_streak",
+    "time_since_start",
+    "index_since_start"
+    ]
 
 
 class SRS:
@@ -105,6 +121,7 @@ class SRS:
         self.image_cache = {}
         self.selected_min_gauss_weights = 0
         self.previous_word_correct = False
+        self.normalization_stats = np.zeros((len(ai_input_columns), 2))
 
         self.init_gui(width_ratio * window_scale, height_ratio * window_scale)
 
@@ -543,8 +560,8 @@ class SRS:
             time_since_last_seen = time_now_scaled - word_data.iloc[7]
 
             correct_score = self.account_typing_start_time(correct, (self.typing_start - self.new_index_time), self.previous_word_correct)
-            old_ema = word_data.iloc[4]
-            new_ema = self.get_ema(old_ema=word_data.iloc[4], accuracy=correct_score)
+            old_ema = word_data.iloc[4] if word_data.iloc[4] != 0 else 0.5
+            new_ema = self.get_ema(old_ema=old_ema, accuracy=correct_score)
 
             word_data.iloc[0] += 1.0 # occurrences in session (will be reset on new session)
             word_data.iloc[1] = time_since_last_seen # last seen (in hours)
@@ -558,40 +575,49 @@ class SRS:
             word_data.iloc[9] = time_now_scaled - self.starting_time # current time since start of session (in hours)
             word_data.iloc[10] = self.index - self.starting_index # current index since start of session
         
-            self.print_data_tensor(word_data) # print data for debugging
+            if print_data_tensor:
+                self.print_data_tensor(word_data) # print data for debugging
 
             # save wheter last word was correct
             self.previous_word_correct = correct
             
             # save new word data in language data
             self.df.iloc[self.current_index] = word_data
-            print(self.get_normalized_df()[self.current_index]) #!
+            self.get_normalized_df() #!
             pd.DataFrame(self.df).to_csv(f"sets/{self.folder}/data.csv", mode="w", index=False, header=feature_columns)
             
             if usable_for_ai:
                 # save reward resulting from old data
                 pd.DataFrame([self.get_reward(old_ema, new_ema, time_since_last_seen)]).to_csv("data/reward_data.csv", mode="a", index=False, header=False)
 
-    def get_normalized_df(self, df=None, is_training=True): #! test both cases !!!FIXX
+    def get_normalized_df(self, df=None, is_training=False):
         df = self.df if df is None else df
         normalized_df = np.zeros((len(df), 9))
-
-        # get non updated rows (use n_reps as reference)
-        mask = df.iloc[:, 3] == 0
-
-        normalized_df[:, 0] = self.log_and_normalize(df.iloc[:, 0]) # occurrences in session
-        normalized_df[:, 1] = self.log_and_normalize(df.iloc[:, 1] if is_training else self.get_scaled_time() - df.iloc[:, 7]) # time since last seen: either use finished datapoint (for training) or use saved data to make a new one
-        normalized_df[:, 2] = self.log_and_normalize(df.iloc[:, 2] if is_training else self.index - df.iloc[:, 8]) # index since last seen: same as above
-        normalized_df[:, 3] = self.log_and_normalize(df.iloc[:, 3]) # n_reps
+        print(df.iloc[:, 0])
+        normalized_df[:, 0] = self.log_and_normalize(df.iloc[:, 0], is_training, 0) # occurrences in session
+        normalized_df[:, 1] = self.log_and_normalize(df.iloc[:, 1] if is_training else self.get_scaled_time() - df.iloc[:, 7], is_training, 1) # time since last seen: either use finished datapoint (for training) or use saved data to make a new one
+        normalized_df[:, 2] = self.log_and_normalize(df.iloc[:, 2] if is_training else self.index - df.iloc[:, 8], is_training, 2) # index since last seen: same as above
+        normalized_df[:, 3] = self.log_and_normalize(df.iloc[:, 3], is_training, 3) # n_reps
         normalized_df[:, 4] = self.normalize(df.iloc[:, 4]) # ema:because accuracy is always between 0 and 1, we can just subtract 0.5 to center it around 0
         normalized_df[:, 5] = self.normalize(df.iloc[:, 5]) # last correct score: same as above
-        normalized_df[:, 6] = self.log_and_normalize(df.iloc[:, 6]) # correct streak
-        normalized_df[:, 7] = self.log_and_normalize(df.iloc[:, 9] if is_training else self.get_scaled_time() - self.starting_time) # time since start of session
-        normalized_df[:, 8] = self.log_and_normalize(df.iloc[:, 10] if is_training else self.index - self.starting_index) # index since start of session
+        normalized_df[:, 6] = self.log_and_normalize(df.iloc[:, 6], is_training, 6) # correct streak
+        normalized_df[:, 7] = self.log_and_normalize(df.iloc[:, 9] if is_training else self.get_scaled_time() - self.starting_time, is_training, 7) # time since start of session
+        normalized_df[:, 8] = self.log_and_normalize(df.iloc[:, 10] if is_training else self.index - self.starting_index, is_training, 8) # index since start of session
 
-        normalized_df[mask] = 0 # set non updated rows to 0
+        if print_normalized_df: #!time since start too small
+            self.print_normalized_df(normalized_df[self.current_index])
 
         return normalized_df
+    
+    def log_and_normalize(self, x, is_training, id):
+        log = np.log1p(x) 
+
+        # if its training get new stat data from training data
+        if is_training:
+            self.save_stats([np.mean(log),np.std(log)]) # use stats so inference and training get the same values for normalization
+
+        # use saved stats for computing
+        return (log - self.normalization_stats[id, 0]) / self.normalization_stats[id, 1] if self.normalization_stats[id, 1] != 0 else log
 
     def normalize(self, x):
         return x - 0.5
@@ -657,6 +683,11 @@ class SRS:
         for i in range(len(feature_columns)):
             print(f"{feature_columns[i]}: {tensor.iloc[i]}")
 
+    def print_normalized_df(self, tensor : pd.Series):
+        print()
+        print(f" ---{self.l1[self.current_index]} (id: {self.current_index})--- ")
+        for i in range(len(ai_input_columns)):
+            print(f"{ai_input_columns[i]}: {tensor[i]}")
 
     def print_validation_reason(self, input, target, min_input_len, input_len, distance):
         print()
@@ -682,10 +713,6 @@ class SRS:
     def use_forward(self):
 
         normalized_df = self.get_normalized_df() #!
-
-    def log_and_normalize(self, x):
-        log = np.log1p(x)
-        return (log - np.mean(log)) / np.std(log) if np.std(log) != 0 else log
 
     def draw(self):
         if not self.settings_clicked:
@@ -900,7 +927,8 @@ class SRS:
         distances = [min([self.word_distance(input_word, word) for word in target_word]) for input_word in input]
         correct = all(input[i] in target_word if len(input[i]) <= 4 else distances[i] <= 1 for i in range(len(input))) and min_input_len <= input_len
 
-        self.print_validation_reason(input, target_word, min_input_len, input_len, distances) 
+        if print_validation:
+            self.print_validation_reason(input, target_word, min_input_len, input_len, distances)
 
         return correct
     
@@ -916,19 +944,32 @@ class SRS:
             self.init_df_tensor()
             if self.n_words != len(self.df):
                 # file doesnt have enough rows ( in case vocab was added later on )
-                rows = pd.DataFrame([[0.0]*len(feature_columns) for _ in range(self.n_words - len(self.df))])
-                # asign start bias to ema
-                rows = self.set_row_val(rows, 4, 0.5)
-                pd.DataFrame(rows).to_csv(f"sets/{self.folder}/data.csv", mode="a", index=False, header=False)
-                self.init_df_tensor()
+                self.df_tensor_add_missing_rows()
 
         except Exception as _:
             # file doesnt exist
-            rows = pd.DataFrame([[0.0]*len(feature_columns) for _ in range(self.n_words)])
-            # asign start bias to ema
-            rows = self.set_row_val(rows, 4, 0.5)
-            pd.DataFrame(rows).to_csv(f"sets/{self.folder}/data.csv", mode="a", index=False, header=feature_columns)
-            self.init_df_tensor()
+            self.df_tensor_add_missing_rows()
+
+        # init stats for log_and_normalize
+        try:
+            self.init_stats()
+
+        except Exception as _:
+            #file doesnt exist
+            init_stats = np.zeros((len(ai_input_columns), 2))
+            self.save_stats(init_stats)
+
+    def save_stats(self, stats):
+        pd.DataFrame(stats).to_csv(f"data/normalization_stats.csv", mode="w", index=False, header=None)
+        self.normalization_stats = stats
+
+    def init_stats(self):
+        self.normalization_stats = pd.read_csv(f"data/normalization_stats.csv", header=0)
+
+    def df_tensor_add_missing_rows(self):
+        rows = pd.DataFrame([[0.0]*len(feature_columns) for _ in range(self.n_words)])
+        pd.DataFrame(rows).to_csv(f"sets/{self.folder}/data.csv", mode="a", index=False, header=feature_columns)
+        self.init_df_tensor()
 
     def init_df_tensor(self):
         df = pd.read_csv(f"sets/{self.folder}/data.csv", header=0)
