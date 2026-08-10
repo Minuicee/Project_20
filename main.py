@@ -24,7 +24,7 @@ import os
     #print
 print_normalized_df = True
 print_validation = False
-print_data_tensor = False
+print_data_tensor = True
     #gui
 window_scale = 200
 button_scale = 2.5 #divides through button scale
@@ -38,6 +38,7 @@ axis_padding_ratio = 0.05
 button_padding = 0.45
 first_button_padding = 0.05
     #logic
+exploration_factor = 0.1
 should_save = True
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
 len_timer = 30 
@@ -583,7 +584,7 @@ class SRS:
             
             # save new word data in language data
             self.df.iloc[self.current_index] = word_data
-            self.get_normalized_df() #!
+
             pd.DataFrame(self.df).to_csv(f"sets/{self.folder}/data.csv", mode="w", index=False, header=feature_columns)
             
             if usable_for_ai:
@@ -593,7 +594,7 @@ class SRS:
     def get_normalized_df(self, df=None, is_training=False):
         df = self.df if df is None else df
         normalized_df = np.zeros((len(df), 9))
-        print(df.iloc[:, 0])
+
         normalized_df[:, 0] = self.log_and_normalize(df.iloc[:, 0], is_training, 0) # occurrences in session
         normalized_df[:, 1] = self.log_and_normalize(df.iloc[:, 1] if is_training else self.get_scaled_time() - df.iloc[:, 7], is_training, 1) # time since last seen: either use finished datapoint (for training) or use saved data to make a new one
         normalized_df[:, 2] = self.log_and_normalize(df.iloc[:, 2] if is_training else self.index - df.iloc[:, 8], is_training, 2) # index since last seen: same as above
@@ -601,10 +602,10 @@ class SRS:
         normalized_df[:, 4] = self.normalize(df.iloc[:, 4]) # ema:because accuracy is always between 0 and 1, we can just subtract 0.5 to center it around 0
         normalized_df[:, 5] = self.normalize(df.iloc[:, 5]) # last correct score: same as above
         normalized_df[:, 6] = self.log_and_normalize(df.iloc[:, 6], is_training, 6) # correct streak
-        normalized_df[:, 7] = self.log_and_normalize(df.iloc[:, 9] if is_training else self.get_scaled_time() - self.starting_time, is_training, 7) # time since start of session
+        normalized_df[:, 7] = self.log_and_normalize(60*(df.iloc[:, 9] if is_training else self.get_scaled_time() - self.starting_time), is_training, 7) # time since start of session (in minutes)
         normalized_df[:, 8] = self.log_and_normalize(df.iloc[:, 10] if is_training else self.index - self.starting_index, is_training, 8) # index since start of session
 
-        if print_normalized_df: #!time since start too small
+        if print_normalized_df: 
             self.print_normalized_df(normalized_df[self.current_index])
 
         return normalized_df
@@ -681,13 +682,13 @@ class SRS:
         print()
         print(f" ---{self.l1[self.current_index]} (id: {self.current_index})--- ")
         for i in range(len(feature_columns)):
-            print(f"{feature_columns[i]}: {tensor.iloc[i]}")
+            print(f"({i}) {feature_columns[i]}: {tensor.iloc[i]}")
 
     def print_normalized_df(self, tensor : pd.Series):
         print()
         print(f" ---{self.l1[self.current_index]} (id: {self.current_index})--- ")
         for i in range(len(ai_input_columns)):
-            print(f"{ai_input_columns[i]}: {tensor[i]}")
+            print(f"({i}) {ai_input_columns[i]}: {tensor[i]}")
 
     def print_validation_reason(self, input, target, min_input_len, input_len, distance):
         print()
@@ -702,13 +703,25 @@ class SRS:
 
         # get new index
         if not self.ignore_ai:
-            self.word_vals = np.random.rand(self.n_words)#! * self.gauss_distribution()
-            self.current_index = int(np.argmax(self.word_vals))
-        else:  
+
+            # determine wether to exploit or explore
+            if self.should_exploit():
+                self.word_vals = np.random.rand(self.n_words)#! * self.gauss_distribution()
+                self.current_index = int(np.argmax(self.word_vals))
+
+            else:
+                unexplored_mask = self.df.iloc[:, 3] == 0 # look out where n_reps == 0
+                self.word_vals = np.random.rand(self.n_words)
+                self.current_index = int(np.argmax(self.word_vals & unexplored_mask)) #! work on this
+        else:
+            #mode to just loop through all words
             self.current_index = self.index % self.n_words # ignore ai and go through words in order
 
         self.new_index_time = time.time()
         self.check_typing_start = True
+
+    def should_exploit(self):
+
 
     def use_forward(self):
 
@@ -964,7 +977,7 @@ class SRS:
         self.normalization_stats = stats
 
     def init_stats(self):
-        self.normalization_stats = pd.read_csv(f"data/normalization_stats.csv", header=0)
+        self.normalization_stats = pd.read_csv(f"data/normalization_stats.csv", header=None).values
 
     def df_tensor_add_missing_rows(self):
         rows = pd.DataFrame([[0.0]*len(feature_columns) for _ in range(self.n_words)])
