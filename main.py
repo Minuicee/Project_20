@@ -12,11 +12,11 @@ import math
 import sys
 import os
 
+# TODO exploration factor slider
 # TODO word cap prompt
 # TODO gaussian button
 # TODO change gaussian range!!!
 # TODO intervall timer
-# TODO remove loop button
 
 #! add feature for session last correct etc if needed
 
@@ -38,7 +38,6 @@ axis_padding_ratio = 0.05
 button_padding = 0.45
 first_button_padding = 0.05
     #logic
-exploration_factor = 0.1
 should_save = True
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
 len_timer = 30 
@@ -123,6 +122,8 @@ class SRS:
         self.selected_min_gauss_weights = 0
         self.previous_word_correct = False
         self.normalization_stats = np.zeros((len(ai_input_columns), 2))
+        self.exploration_factor = 1
+        self.exploitation_count = 0
 
         self.init_gui(width_ratio * window_scale, height_ratio * window_scale)
 
@@ -705,14 +706,16 @@ class SRS:
         if not self.ignore_ai:
 
             # determine wether to exploit or explore
-            if self.should_exploit():
+            if not self.should_explore():
+                self.exploitation_count += 1
                 self.word_vals = np.random.rand(self.n_words)#! * self.gauss_distribution()
                 self.current_index = int(np.argmax(self.word_vals))
 
             else:
+                self.exploitation_count = 0
                 unexplored_mask = self.df.iloc[:, 3] == 0 # look out where n_reps == 0
                 self.word_vals = np.random.rand(self.n_words)
-                self.current_index = int(np.argmax(self.word_vals & unexplored_mask)) #! work on this
+                self.current_index = int(np.argmax(self.word_vals & unexplored_mask))
         else:
             #mode to just loop through all words
             self.current_index = self.index % self.n_words # ignore ai and go through words in order
@@ -720,8 +723,17 @@ class SRS:
         self.new_index_time = time.time()
         self.check_typing_start = True
 
-    def should_exploit(self):
+    def should_explore(self):
+        A = 4.8
+        B = 4.7
+        C = 0.05
+        D = 4
+        E = 1.06
 
+        n_explored = np.sum(self.df.iloc[:, 3] != 0) # get sum of explored items
+        avrg_certainty = 0.5 + np.average(self.df.iloc[:, 5]) # use last correct score. if avrg score is below 0.5, multiplication will make exploration less likely. opposite for above 0.5
+
+        exploration_chance = ((A/(n_explored+B)) + C) * (avrg_certainty ** D) * self.exploration_factor * (E ** self.exploitation_count) #! work on this and test
 
     def use_forward(self):
 
