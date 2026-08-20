@@ -18,13 +18,14 @@ import os
 # TODO change gaussian range!!!
 # TODO intervall timer
 
-#! add feature for session last correct etc if needed
 
 # parameters for dev
     #print
-print_normalized_df = True
-print_validation = False
-print_data_tensor = True
+print_data_tensor = False # saved data tensor after word input
+print_validation = False # explain systems choice to validate or invalidate users input
+print_normalized_df = False # complete
+print_exploration_chance = True
+print_exploration_validation = True
     #gui
 window_scale = 200
 button_scale = 2.5 #divides through button scale
@@ -70,7 +71,8 @@ feature_columns = [
     "current_time",
     "current_index",
     "time_since_start",
-    "index_since_start"
+    "index_since_start",
+    "session_ema"
     ]
 ai_input_columns =  [
     "occurrences_session",
@@ -81,7 +83,8 @@ ai_input_columns =  [
     "last_correct_score",
     "correct_streak",
     "time_since_start",
-    "index_since_start"
+    "index_since_start",
+    "session_ema"
     ]
 
 
@@ -91,39 +94,57 @@ class SRS:
         pygame.init()
 
         # init variables
+            # data
         self.folder = ""
+        self.df = pd.DataFrame()
+        self.image_cache = {}
+
+            # index
         self.current_index = -1
-        self.ticks = 0
-        self.timer_running = False
-        self.check_typing_start = True
-        self.pause_triggered = False
-        self.new_index_time = 0
-        self.typing_start = 0
+        self.last_index = -1
         self.index = 0
         self.starting_index = 0
-        self.starting_time = 0
-        self.input_text = ""
-        self.inactive_ticks = 0
         self.n_words = 0
-        self.editing_step = 0
-        self.last_index = -1
-        self.ctrl_held = False
-        self.is_linux = False
+
+            # timers
+        self.ticks = 0
+        self.timer_running = False
+        self.new_index_time = 0
+        self.starting_time = 0
+        self.inactive_ticks = 0
+
+            # text input
+        self.check_typing_start = True
+        self.typing_start = 0
+        self.input_text = ""
+        self.pause_triggered = False
+
+            # mouse / keyboard
+        self.ctrl_hold = False
         self.mouse_hold = False
         self.coordinate_click_start_time = 0
-        self.df = pd.DataFrame()
-        self.settings_clicked = False
-        self.get_new_gaussian = False
         self.ignore_next_button_up = False
-        self.ignore_ai = False
+
+        # --- UI/Settings ---
+        self.settings_clicked = False
+        self.editing_step = 0
         self.selected_focused_area = 0
+
+        # --- Plattform ---
+        self.is_linux = False
+
+        # --- Gaussian/Weights ---
+        self.get_new_gaussian = False
         self.selected_sigma_factor = 0
-        self.image_cache = {}
         self.selected_min_gauss_weights = 0
+
+        # --- KI / Lernlogik ---
+        self.ignore_ai = False
         self.previous_word_correct = False
         self.normalization_stats = np.zeros((len(ai_input_columns), 2))
         self.exploration_factor = 1
         self.exploitation_count = 0
+        self.session_ema = 0.5
 
         self.init_gui(width_ratio * window_scale, height_ratio * window_scale)
 
@@ -392,9 +413,9 @@ class SRS:
 
             elif event.type == pygame.KEYDOWN and not self.timer_running:
                 if event.key == pygame.K_LCTRL:
-                    self.ctrl_held = True
+                    self.ctrl_hold = True
 
-                elif self.ctrl_held:
+                elif self.ctrl_hold:
                     if event.key == pygame.K_f:
                         self.trigger_folder_button()
                     elif event.key == pygame.K_g:
@@ -439,7 +460,7 @@ class SRS:
                                     self.check_input()
                         elif event.key == pygame.K_BACKSPACE:
                             # add a seperate if statement so backspace character is not printed in the input text
-                            if not self.ctrl_held:
+                            if not self.ctrl_hold:
                                 self.input_text = self.input_text[:-1]
                         else:
                             if self.check_typing_start:
@@ -481,7 +502,7 @@ class SRS:
             
             elif event.type == pygame.KEYUP:
                 if event.key == pygame.K_LCTRL:
-                    self.ctrl_held = False
+                    self.ctrl_hold = False
             
         if not found_keydown and not self.editing_step:
             self.inactive_ticks += 1
@@ -565,6 +586,9 @@ class SRS:
             old_ema = word_data.iloc[4] if word_data.iloc[4] != 0 else 0.5
             new_ema = self.get_ema(old_ema=old_ema, accuracy=correct_score)
 
+            # update session ema
+            self.session_ema = self.get_ema(old_ema=self.session_ema, accuracy=correct_score)
+
             word_data.iloc[0] += 1.0 # occurrences in session (will be reset on new session)
             word_data.iloc[1] = time_since_last_seen # last seen (in hours)
             word_data.iloc[2] = float(self.index - word_data.iloc[8]) # last seen index
@@ -576,11 +600,12 @@ class SRS:
             word_data.iloc[8] = float(self.index) # current index
             word_data.iloc[9] = time_now_scaled - self.starting_time # current time since start of session (in hours)
             word_data.iloc[10] = self.index - self.starting_index # current index since start of session
+            word_data.iloc[11] = self.session_ema
         
             if print_data_tensor:
                 self.print_data_tensor(word_data) # print data for debugging
 
-            # save wheter last word was correct
+            # save whether last word was correct
             self.previous_word_correct = correct
             
             # save new word data in language data
@@ -594,7 +619,7 @@ class SRS:
 
     def get_normalized_df(self, df=None, is_training=False):
         df = self.df if df is None else df
-        normalized_df = np.zeros((len(df), 9))
+        normalized_df = np.zeros((len(df), 10))
 
         normalized_df[:, 0] = self.log_and_normalize(df.iloc[:, 0], is_training, 0) # occurrences in session
         normalized_df[:, 1] = self.log_and_normalize(df.iloc[:, 1] if is_training else self.get_scaled_time() - df.iloc[:, 7], is_training, 1) # time since last seen: either use finished datapoint (for training) or use saved data to make a new one
@@ -605,7 +630,7 @@ class SRS:
         normalized_df[:, 6] = self.log_and_normalize(df.iloc[:, 6], is_training, 6) # correct streak
         normalized_df[:, 7] = self.log_and_normalize(60*(df.iloc[:, 9] if is_training else self.get_scaled_time() - self.starting_time), is_training, 7) # time since start of session (in minutes)
         normalized_df[:, 8] = self.log_and_normalize(df.iloc[:, 10] if is_training else self.index - self.starting_index, is_training, 8) # index since start of session
-
+        normalized_df[:, 9] = self.normalize(df.iloc[:, 11]) # session ema between 0 and 1
         if print_normalized_df: 
             self.print_normalized_df(normalized_df[self.current_index])
 
@@ -703,19 +728,22 @@ class SRS:
             self.last_index = self.current_index
 
         # get new index
-        if not self.ignore_ai:
+        if not self.ignore_ai: #! * self.gauss_distribution()
 
-            # determine wether to exploit or explore
+            # determine whether to exploit or explore
             if not self.should_explore():
+                print(1)
                 self.exploitation_count += 1
-                self.word_vals = np.random.rand(self.n_words)#! * self.gauss_distribution()
+                self.word_vals = np.random.rand(self.n_words)
                 self.current_index = int(np.argmax(self.word_vals))
 
             else:
+                print(2)
                 self.exploitation_count = 0
                 unexplored_mask = self.df.iloc[:, 3] == 0 # look out where n_reps == 0
                 self.word_vals = np.random.rand(self.n_words)
-                self.current_index = int(np.argmax(self.word_vals & unexplored_mask))
+                masked_vals = np.where(unexplored_mask, self.word_vals, -np.inf)
+                self.current_index = int(np.argmax(masked_vals))        
         else:
             #mode to just loop through all words
             self.current_index = self.index % self.n_words # ignore ai and go through words in order
@@ -727,13 +755,32 @@ class SRS:
         A = 4.8
         B = 4.7
         C = 0.05
-        D = 4
+        D = 2
         E = 1.06
 
         n_explored = np.sum(self.df.iloc[:, 3] != 0) # get sum of explored items
-        avrg_certainty = 0.5 + np.average(self.df.iloc[:, 5]) # use last correct score. if avrg score is below 0.5, multiplication will make exploration less likely. opposite for above 0.5
+        current_certainty = 0.5 + self.session_ema # use last correct score. if avrg score is below 0.5, multiplication will make exploration less likely. opposite for above 0.5
+        filtered = self.df.iloc[:, 4][self.df.iloc[:, 4] != 0]
+        avrg_certainty = 0.5 + np.mean(filtered) if len(filtered) > 0 else 1 # use average of all saved accuracies
 
-        exploration_chance = ((A/(n_explored+B)) + C) * (avrg_certainty ** D) * self.exploration_factor * (E ** self.exploitation_count) #! work on this and test
+        exploration_chance = ((A/(n_explored+B)) + C) * (current_certainty ** D) * (avrg_certainty ** D) * self.exploration_factor * (E ** self.exploitation_count)
+        return_val = True if np.random.random() < exploration_chance else False # generate a number to see whether to explore
+
+        if print_exploration_chance:
+            print()
+            print(f"Exploration likelihood: {exploration_chance*100:.2f}%")#
+            print(f"Output: {return_val}")
+
+        if print_exploration_validation:
+            print()
+            print("Exploration chance factors:")
+            print(f"n_explored: {n_explored}")
+            print(f"current_certainty: {current_certainty:.3f}")
+            print(f"avrg_certainty: {avrg_certainty:.3f}")
+            print(f"exploration_factor: {self.exploration_factor}")
+            print(f"exploitation_count: {self.exploitation_count}")
+        
+        return return_val
 
     def use_forward(self):
 
@@ -1000,6 +1047,8 @@ class SRS:
         df = pd.read_csv(f"sets/{self.folder}/data.csv", header=0)
         # reset occurrences in session and save as self.df
         self.df = self.set_row_val(df, 0, 0.0)
+        # also reset session ema
+        self.df = self.set_row_val(df, 11, 0)
 
     def set_row_val(self, df: pd.DataFrame, col, val):
         df.iloc[:, col] = val

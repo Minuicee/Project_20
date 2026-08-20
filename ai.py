@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 import pandas as pd
-import main
 
 class ai(nn.Module): #TODO add training mode: every x words train the model
 
@@ -41,11 +40,11 @@ class ai(nn.Module): #TODO add training mode: every x words train the model
                 total_loss += loss.item() #calculate total loss for the epoch
             print(f"Epoch {epoch + 1}/{n_epochs}, Loss: {total_loss/len(self.x_data):.5f}")
 
-    def init_data(self):
-        feature_data = pd.read_csv("data/feature_data.csv")
-        feature_data = main.get_normalized_df(self, feature_data, is_training=True) # normalize the data
-        self.x_data = torch.tensor(feature_data, dtype=torch.float32)
-        self.y_data = torch.tensor(pd.read_csv("data/reward_data.csv").values, dtype=torch.float32)
+    # def init_data(self):
+    #     feature_data = pd.read_csv("data/feature_data.csv")
+    #     feature_data = main.get_normalized_df(self, feature_data, is_training=True) # normalize the data
+    #     self.x_data = torch.tensor(feature_data, dtype=torch.float32)
+    #     self.y_data = torch.tensor(pd.read_csv("data/reward_data.csv").values, dtype=torch.float32)
         
     def plot_df(self):
         self.df.hist(figsize=(12,8))
