@@ -15,8 +15,8 @@ import os
 # TODO exploration factor slider
 # TODO word cap prompt
 # TODO gaussian button
-# TODO change gaussian range!!!
 # TODO intervall timer
+# TODO change gaussian range!!!
 
 
 # parameters for dev
@@ -25,7 +25,7 @@ print_data_tensor = False # saved data tensor after word input
 print_validation = False # explain systems choice to validate or invalidate users input
 print_normalized_df = False # complete
 print_exploration_chance = True
-print_exploration_validation = True
+print_exploration_validation = False
     #gui
 window_scale = 200
 button_scale = 2.5 #divides through button scale
@@ -59,7 +59,6 @@ min_gauss_weights_min = 0
 min_gauss_weights_range = 0.9
 focused_area = std_focused_area # cant be bigger than word_cap and n_words
 ignore_characters = " \x08'/(),-;?!\"\n.…"
-ignore_words = ["der", "die", "das"] # german articles
 feature_columns = [
     "occurrences_session",
     "last_seen",
@@ -86,6 +85,10 @@ ai_input_columns =  [
     "index_since_start",
     "session_ema"
     ]
+    #support for german language
+short_form_list = [["etwas"], ["jemand", "jemandem", "jemanden"]]
+short_form_translation = ["etw", "jmd"]
+ignore_words = ["der", "die", "das"] # german articles
 
 
 class SRS:
@@ -426,8 +429,6 @@ class SRS:
                         self.trigger_pause()
                     elif event.key == pygame.K_l:
                         self.trigger_loop_button()
-                    elif event.key == pygame.K_p:
-                        self.plot_df()
                     elif event.key == pygame.K_d:
                         if self.last_index != -1:
                             self.delete_row(self.last_index)
@@ -732,13 +733,11 @@ class SRS:
 
             # determine whether to exploit or explore
             if not self.should_explore():
-                print(1)
                 self.exploitation_count += 1
                 self.word_vals = np.random.rand(self.n_words)
                 self.current_index = int(np.argmax(self.word_vals))
 
             else:
-                print(2)
                 self.exploitation_count = 0
                 unexplored_mask = self.df.iloc[:, 3] == 0 # look out where n_reps == 0
                 self.word_vals = np.random.rand(self.n_words)
@@ -747,7 +746,7 @@ class SRS:
         else:
             #mode to just loop through all words
             self.current_index = self.index % self.n_words # ignore ai and go through words in order
-
+        self.current_index = 620
         self.new_index_time = time.time()
         self.check_typing_start = True
 
@@ -1008,7 +1007,18 @@ class SRS:
         # replace all characters on list with space
         for c in ignore_characters:
             word = word.replace(c, " ")
-        return [x for x in str(word).lower().split() if x not in ignore_words]
+
+        # replace every listed short form with its matching translation
+        words = str(word).lower().split()
+        short_form_translations = {
+            form: translation
+            for forms, translation in zip(short_form_list, short_form_translation)
+            for form in forms
+        }
+        words = [short_form_translations.get(current_word, current_word) for current_word in words]
+
+        return [x for x in words if x not in ignore_words]
+
 
     def init_data(self):
         # init collected data
@@ -1032,7 +1042,7 @@ class SRS:
             self.save_stats(init_stats)
 
     def save_stats(self, stats):
-        pd.DataFrame(stats).to_csv(f"data/normalization_stats.csv", mode="w", index=False, header=None)
+        pd.DataFrame(stats).to_csv(f"data/normalization_stats.csv", mode="w", index=False, header=False)
         self.normalization_stats = stats
 
     def init_stats(self):
