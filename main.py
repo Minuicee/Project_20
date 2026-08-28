@@ -12,25 +12,28 @@ import math
 import sys
 import os
 
-# TODO exploration factor slider
-# TODO word cap prompt
-# TODO gaussian button
-# TODO intervall timer
-# TODO change gaussian range!!!
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
+
+# TODO intervall timer
+# TODO less padding between sliders
+# TODO add text for shortcuts
+
+# TODO change gaussian range!!!
 
 # parameters for dev
     #print
-print_data_tensor = False # saved data tensor after word input
+print_data_tensor = True # saved data tensor after word input
 print_validation = False # explain systems choice to validate or invalidate users input
-print_normalized_df = False # complete
+print_normalized_df = False # complete data for nn
 print_exploration_chance = True
 print_exploration_validation = False
+print_expected_ema = False
     #gui
 window_scale = 200
 button_scale = 2.5 #divides through button scale
 width_ratio = 6
-height_ratio = 3        # (copy pasted)
+height_ratio = 3 
 font_word_ratio = 0.3
 font_input_ratio = 0.2
 border_radius_ratio = 0.1 
@@ -41,7 +44,14 @@ first_button_padding = 0.05
     #logic
 should_save = True
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
-len_timer = 30 
+starting_cap = 0 # first word index that may be shown
+len_timer = 30
+len_timer_min = 0
+len_timer_max = 60
+min_timer = 15
+min_timer_min = 5
+min_timer_max = 30
+max_fps = 60
 max_inactive_ticks = 450 #30ticks/second
     #ai parameters
 ema_alpha = 0.3
@@ -57,6 +67,9 @@ sigma_factor_range = 4.9
 min_gauss_weights = std_min_gauss_weights
 min_gauss_weights_min = 0
 min_gauss_weights_range = 0.9
+exploration_factor_min = 0.5
+exploration_factor_max = 1.5
+slider_snap_sensitivity = 0.05
 focused_area = std_focused_area # cant be bigger than word_cap and n_words
 ignore_characters = " \x08'/(),-;?!\"\n.…"
 feature_columns = [
@@ -108,6 +121,8 @@ class SRS:
         self.index = 0
         self.starting_index = 0
         self.n_words = 0
+        self.total_words = 0
+        self.next_button_index = 0
 
             # timers
         self.ticks = 0
@@ -121,10 +136,14 @@ class SRS:
         self.typing_start = 0
         self.input_text = ""
         self.pause_triggered = False
-
             # mouse / keyboard
         self.ctrl_hold = False
         self.mouse_hold = False
+        self.exploration_slider_active = False
+        self.timer_slider_active = False
+        self.timer_min_slider_active = False
+        self.starting_cap_slider_active = False
+        self.word_cap_slider_active = False
         self.coordinate_click_start_time = 0
         self.ignore_next_button_up = False
 
@@ -143,6 +162,7 @@ class SRS:
 
         # --- KI / Lernlogik ---
         self.ignore_ai = False
+        self.use_gaussian = False
         self.previous_word_correct = False
         self.normalization_stats = np.zeros((len(ai_input_columns), 2))
         self.exploration_factor = 1
@@ -226,6 +246,7 @@ class SRS:
         global min_gauss_weights
         global focused_area
         global sigma_factor
+        global min_timer
 
         try:
             # init min gauss weights
@@ -243,8 +264,13 @@ class SRS:
                 line = f.readline().strip()
                 sigma_factor = float(line)
 
+            with open(f"sets/{self.folder}/config/min_timer.csv", "r", encoding="utf-8") as f:
+                line = f.readline().strip()
+                min_timer = float(line)
+
         except FileNotFoundError:
             os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
+            min_timer = 15
 
             # init new standard parameters
             with open(f"sets/{self.folder}/config/sigma_factor.csv", "w", encoding="utf-8") as f:
@@ -253,6 +279,8 @@ class SRS:
                     f.write(str(std_min_gauss_weights) + "\n")
             with open(f"sets/{self.folder}/config/focused_area.csv", "w", encoding="utf-8") as f:
                     f.write(str(std_focused_area) + "\n")
+            with open(f"sets/{self.folder}/config/min_timer.csv", "w", encoding="utf-8") as f:
+                    f.write(str(min_timer) + "\n")
 
             sigma_factor = std_sigma_factor
             min_gauss_weights = std_min_gauss_weights
@@ -312,25 +340,26 @@ class SRS:
             # init first language vocab
             with open(f"sets/{self.folder}/language1.csv", "r", encoding="utf-8") as f:
                 self.l1 = [line.strip().lower() for line in f]
-                self.n_words = len(self.l1)
+                self.all_l1 = self.l1.copy()
+                self.total_words = len(self.l1)
+                self.n_words = self.total_words
 
                 #making sure parameters are in range
-                if word_cap > 0 and word_cap > self.n_words:
-                    print("Error: word_cap bigger than n_words!")
+                last_word_index = word_cap if word_cap > 0 else self.total_words - 1
+                if starting_cap < 0 or word_cap < 0 or last_word_index >= self.total_words:
+                    print("Error: word range outside dataset!")
                     sys.exit()
 
-                if focused_area > self.n_words or (word_cap > 0 and focused_area > word_cap):
-                    print("Error: focused_area bigger than n_words or word cap!")
+                if starting_cap + 1 > last_word_index:
+                    print("Error: word_cap must be at least 1 above starting_cap")
                     sys.exit()
                 
-                if word_cap:
-                    self.l1 = self.l1[:word_cap]
-                    self.n_words = len(self.l1)
+                self.l1 = self.all_l1[starting_cap:last_word_index + 1]
+                self.n_words = len(self.l1)
             # init corresponding second language
             with open(f"sets/{self.folder}/language2.csv", "r", encoding="utf-8") as f:
                 self.l2 = [line.strip().lower() for line in f]
-                if word_cap:
-                    self.l2 = self.l2[:word_cap]
+                self.l2 = self.l2[starting_cap:last_word_index + 1]
 
             self.source = self.l1
             self.target = self.l2
@@ -357,11 +386,56 @@ class SRS:
         self.gaussian_font = pygame.font.SysFont("calibri", int(gaussian_font_ratio*window_scale))
 
         # Buttons in order
-        self.folder_button = pygame.Rect((first_button_padding)*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.edit_button = pygame.Rect((1*button_padding+first_button_padding)*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.settings_button = pygame.Rect((2*button_padding+first_button_padding)*window_scale, 0.05*window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.loop_button = pygame.Rect((3*button_padding+first_button_padding)*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+
+        self.settings_button = pygame.Rect(self.get_button_x()*window_scale, 0.05*window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.edit_button = pygame.Rect(self.get_button_x(2)*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.loop_button = pygame.Rect(self.get_button_x()*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.gaussian_button = pygame.Rect(self.get_button_x()*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
+        self.folder_button = pygame.Rect(self.get_button_x()*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
         self.coordinate_system_rect = pygame.Rect(self.WIDTH // 7, self.HEIGHT // 5, self.WIDTH * 7 // 10, self.HEIGHT * 7 // 10)
+        slider_gap = int(0.04 * window_scale)
+        slider_width = self.WIDTH // 6
+        slider_height = int(0.1 * window_scale)
+        slider_column_gap = int(0.225 * window_scale) + 25
+        right_slider_left = self.WIDTH * 4 // 5
+        middle_slider_left = right_slider_left - slider_width - slider_column_gap
+        left_slider_left = middle_slider_left - slider_width - slider_column_gap
+        self.exploration_slider_rect = pygame.Rect(
+            middle_slider_left,
+            slider_gap * 2,
+            slider_width,
+            slider_height,
+        )
+        self.timer_slider_rect = pygame.Rect(
+            self.exploration_slider_rect.left,
+            self.exploration_slider_rect.bottom + slider_gap * 4,
+            slider_width,
+            slider_height,
+        )
+        self.starting_cap_slider_rect = pygame.Rect(
+            right_slider_left,
+            self.exploration_slider_rect.top,
+            slider_width,
+            slider_height,
+        )
+        self.timer_min_slider_rect = pygame.Rect(
+            left_slider_left,
+            self.starting_cap_slider_rect.top,
+            slider_width,
+            slider_height,
+        )
+        self.start_button = pygame.Rect(
+            self.timer_min_slider_rect.left,
+            self.timer_min_slider_rect.bottom + int(0.07 * window_scale) + self.gaussian_font.get_linesize() + slider_gap - 10,
+            slider_width,
+            int(0.18 * window_scale),
+        )
+        self.word_cap_slider_rect = pygame.Rect(
+            right_slider_left,
+            self.timer_slider_rect.top,
+            slider_width,
+            slider_height,
+        )
 
         # colours
         self.DARK = "#0D0E29"
@@ -376,6 +450,13 @@ class SRS:
         self.BUTTON_CLICKED = "#7A4CE6"     # clicked
         self.BUTTON_CLICKED_HOVER = "#9460F0"  # clicked + hover
         self.BUTTON_TEXT = "#130C1D"
+        self.button_tooltips = {
+            "settings": "Open settings",
+            "loop": "Ignore AI and loop through all words in order",
+            "gaussian": "Let selected gaussian curve affect AI",
+            "edit": "Edit recent word",
+            "folder": "Change dataset",
+        }
         self.COORDINATE_SYSTEM = "#1D3873"
         self.COORDINATE_SYSTEM_GRAPH = "#0DE5F0"
         self.GRID_COLOR = "#14264F"
@@ -383,6 +464,14 @@ class SRS:
         self.coordinate_system_line_thickness = 5
 
         self.clock = pygame.time.Clock()
+
+    def get_button_x(self, num=None):
+        if num:
+            return (num - 1)*button_padding + first_button_padding
+        else:
+            self.next_button_index += 1
+            return (self.next_button_index - 1)*button_padding + first_button_padding
+
 
     def run(self):
         self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
@@ -393,12 +482,14 @@ class SRS:
             self.handle_events()
             self.draw()
             pygame.display.flip()
-            self.clock.tick(30)
+            self.clock.tick(max_fps)
     
     def handle_events(self):
         global focused_area
         global sigma_factor
         global min_gauss_weights
+        global len_timer
+        global len_timer_min
 
         found_keydown = False
 
@@ -407,6 +498,13 @@ class SRS:
         self.folder_button_hover = self.folder_button.collidepoint(mouse_pos)
         self.edit_button_hover = self.edit_button.collidepoint(mouse_pos)
         self.loop_button_hover = self.loop_button.collidepoint(mouse_pos)
+        self.gaussian_button_hover = self.gaussian_button.collidepoint(mouse_pos)
+        self.exploration_slider_hover = self.exploration_slider_rect.collidepoint(mouse_pos)
+        self.timer_slider_hover = self.timer_slider_rect.collidepoint(mouse_pos)
+        self.timer_min_slider_hover = self.timer_min_slider_rect.collidepoint(mouse_pos)
+        self.start_button_hover = self.start_button.collidepoint(mouse_pos)
+        self.starting_cap_slider_hover = self.starting_cap_slider_rect.collidepoint(mouse_pos)
+        self.word_cap_slider_hover = self.word_cap_slider_rect.collidepoint(mouse_pos)
         self.coordinate_system_hover = mouse_pos if self.coordinate_system_rect.collidepoint(mouse_pos) else None
 
         for event in pygame.event.get():
@@ -433,6 +531,8 @@ class SRS:
                         if self.last_index != -1:
                             self.delete_row(self.last_index)
                             self.last_index = -1
+                            print()
+                            print(f"..deleted word {self.l2[self.last_index]}..")
                     elif event.key == pygame.K_BACKSPACE:
                         self.input_text = "" if self.input_text == "" else " ".join(self.input_text.split()[:-1])
 
@@ -474,14 +574,46 @@ class SRS:
                 if self.settings_button_hover and not self.editing_step:
                     self.trigger_settings_button()
 
-                elif self.folder_button_hover and not self.is_linux:
+                elif self.settings_clicked and self.exploration_slider_hover:
+                    self.exploration_slider_active = True
+                    self.exploration_factor = self.update_slider(
+                        self.exploration_slider_rect,
+                        exploration_factor_min,
+                        exploration_factor_max,
+                        mouse_pos[0],
+                    )
+
+                elif self.settings_clicked and self.timer_slider_hover:
+                    self.timer_slider_active = True
+                    self.update_timer_slider(mouse_pos[0])
+
+                elif self.settings_clicked and self.timer_min_slider_hover:
+                    self.timer_min_slider_active = True
+                    self.update_timer_min_slider(mouse_pos[0])
+
+                elif self.settings_clicked and self.start_button_hover:
+                    #! add logic
+                    pass
+
+                elif self.settings_clicked and self.starting_cap_slider_hover:
+                    self.starting_cap_slider_active = True
+                    self.update_starting_cap_slider(mouse_pos[0])
+
+                elif self.settings_clicked and self.word_cap_slider_hover:
+                    self.word_cap_slider_active = True
+                    self.update_word_cap_slider(mouse_pos[0])
+
+                elif self.settings_clicked and self.folder_button_hover and not self.is_linux:
                     self.trigger_folder_button()
 
-                elif self.edit_button_hover and not self.last_index == -1:
+                elif not self.settings_clicked and self.edit_button_hover and not self.last_index == -1:
                     self.trigger_edit_button()
 
-                elif self.loop_button_hover:
+                elif self.settings_clicked and self.loop_button_hover:
                     self.trigger_loop_button()
+
+                elif self.settings_clicked and self.gaussian_button_hover:
+                    self.trigger_gaussian_button()
                     
                 elif self.coordinate_system_hover:
                     self.coordinate_click_start_time = time.time()
@@ -492,6 +624,37 @@ class SRS:
 
             elif event.type == pygame.MOUSEBUTTONUP:
                 self.mouse_hold = False
+                if self.exploration_slider_active:
+                    self.exploration_factor = self.snap_slider_value(
+                        self.exploration_factor,
+                        exploration_factor_min,
+                        exploration_factor_max,
+                        [0.5, 0.75, 1.0, 1.25, 1.5],
+                    )
+                if self.timer_slider_active:
+                    self.timer_value = self.snap_slider_value(
+                        self.timer_value,
+                        len_timer_min,
+                        len_timer_max,
+                        [0, 15, 30, 45, 60],
+                    )
+                    len_timer = round(self.timer_value)
+                if self.timer_min_slider_active:
+                    global min_timer
+                    min_timer = min(
+                        [5, 10, 15, 20, 25, 30],
+                        key=lambda value: abs(value - self.min_timer_value),
+                    )
+                    with open(f"sets/{self.folder}/config/min_timer.csv", "w", encoding="utf-8") as f:
+                        f.write(str(min_timer) + "\n")
+                self.exploration_slider_active = False
+                self.timer_slider_active = False
+                self.timer_min_slider_active = False
+                caps_changed = self.starting_cap_slider_active or self.word_cap_slider_active
+                self.starting_cap_slider_active = False
+                self.word_cap_slider_active = False
+                if caps_changed:
+                    self.apply_word_caps()
                 if self.ignore_next_button_up == True:
                     self.ignore_next_button_up = False
                 else:
@@ -500,10 +663,30 @@ class SRS:
                         self.save_min_gauss_weights(self.selected_min_gauss_weights)
                         self.save_focused_area(self.selected_focused_area)
                         self.get_new_gaussian = False
-            
+
             elif event.type == pygame.KEYUP:
                 if event.key == pygame.K_LCTRL:
                     self.ctrl_hold = False
+
+        if self.exploration_slider_active:
+            self.exploration_factor = self.update_slider(
+                self.exploration_slider_rect,
+                exploration_factor_min,
+                exploration_factor_max,
+                pygame.mouse.get_pos()[0],
+            )
+
+        if self.timer_slider_active:
+            self.update_timer_slider(pygame.mouse.get_pos()[0])
+
+        if self.timer_min_slider_active:
+            self.update_timer_min_slider(pygame.mouse.get_pos()[0])
+
+        if self.starting_cap_slider_active:
+            self.update_starting_cap_slider(pygame.mouse.get_pos()[0])
+
+        if self.word_cap_slider_active:
+            self.update_word_cap_slider(pygame.mouse.get_pos()[0])
             
         if not found_keydown and not self.editing_step:
             self.inactive_ticks += 1
@@ -540,6 +723,76 @@ class SRS:
             self.ignore_ai = True
         self.trigger_pause()
 
+    def trigger_gaussian_button(self):
+        self.use_gaussian = not self.use_gaussian
+        self.trigger_pause()
+
+    def update_slider(self, slider_rect, minimum, maximum, mouse_x, snap_values=None):
+        slider_left = slider_rect.left
+        slider_right = slider_rect.right
+        if maximum <= minimum:
+            return minimum
+        slider_ratio = (mouse_x - slider_left) / (slider_right - slider_left)
+        slider_ratio = max(0.0, min(1.0, slider_ratio))
+        value = minimum + slider_ratio * (maximum - minimum)
+        if snap_values:
+            return min(snap_values, key=lambda snap_value: abs(snap_value - value))
+        return value
+
+    def snap_slider_value(self, value, minimum, maximum, snap_values):
+        if maximum <= minimum or not snap_values:
+            return value
+        closest_value = min(snap_values, key=lambda snap_value: abs(snap_value - value))
+        if abs(closest_value - value) <= (maximum - minimum) * slider_snap_sensitivity:
+            return closest_value
+        return value
+
+    def update_timer_slider(self, mouse_x):
+        self.timer_value = self.update_slider(
+            self.timer_slider_rect,
+            len_timer_min,
+            len_timer_max,
+            mouse_x,
+        )
+        global len_timer
+        len_timer = round(self.timer_value)
+
+    def update_timer_min_slider(self, mouse_x):
+        self.min_timer_value = self.update_slider(
+            self.timer_min_slider_rect,
+            min_timer_min,
+            min_timer_max,
+            mouse_x,
+        )
+
+    def update_starting_cap_slider(self, mouse_x):
+        global starting_cap
+        maximum_word_index = word_cap if word_cap > 0 else self.total_words - 1
+        starting_cap = round(self.update_slider(
+            self.starting_cap_slider_rect,
+            0,
+            max(0, maximum_word_index - 2),
+            mouse_x,
+        ))
+
+    def update_word_cap_slider(self, mouse_x):
+        global word_cap
+        word_cap = round(self.update_slider(
+            self.word_cap_slider_rect,
+            starting_cap + 2,
+            self.total_words - 1,
+            mouse_x,
+        ))
+        if word_cap == self.total_words - 1:
+            word_cap = 0
+
+    def apply_word_caps(self):
+        self.init_folder()
+        self.init_data()
+        self.current_index = -1
+        self.last_index = -1
+        self.trigger_pause()
+
     def trigger_pause(self):
         self.input_text = ""
         self.pause_triggered = True
@@ -560,6 +813,7 @@ class SRS:
         self.input_text = ""
 
     def increment_index(self):
+        print(self.use_gaussian)
         self.index += 1
         with open("user_data/index.csv", "w", encoding="utf-8") as f:
             f.write(str(self.index) + "\n")
@@ -589,7 +843,6 @@ class SRS:
 
             # update session ema
             self.session_ema = self.get_ema(old_ema=self.session_ema, accuracy=correct_score)
-
             word_data.iloc[0] += 1.0 # occurrences in session (will be reset on new session)
             word_data.iloc[1] = time_since_last_seen # last seen (in hours)
             word_data.iloc[2] = float(self.index - word_data.iloc[8]) # last seen index
@@ -658,7 +911,8 @@ class SRS:
 
     def get_reward(self, old_ema, new_ema, time_since_last_seen, decay_lambda=0.005):
         expected_ema = old_ema * math.exp(-decay_lambda * time_since_last_seen)
-        print(f"expected ema: {expected_ema}")
+        if print_expected_ema:
+            print(f"expected ema: {expected_ema}")
         return new_ema - expected_ema
 
     def save_sigma_factor(self, selected_sigma_factor):
@@ -729,24 +983,24 @@ class SRS:
             self.last_index = self.current_index
 
         # get new index
-        if not self.ignore_ai: #! * self.gauss_distribution()
-
+        if not self.ignore_ai:
+            selection_weights = self.gauss_distribution() if self.use_gaussian else np.ones(self.n_words)
+            explored_mask = self.df.iloc[:, 3] != 0
             # determine whether to exploit or explore
             if not self.should_explore():
                 self.exploitation_count += 1
-                self.word_vals = np.random.rand(self.n_words)
-                self.current_index = int(np.argmax(self.word_vals))
+                self.word_vals = np.random.rand(self.n_words) * selection_weights #! change
+                masked_vals = np.where(explored_mask, self.word_vals, -np.inf)
+                self.current_index = int(np.argmax(masked_vals))
 
             else:
                 self.exploitation_count = 0
-                unexplored_mask = self.df.iloc[:, 3] == 0 # look out where n_reps == 0
-                self.word_vals = np.random.rand(self.n_words)
-                masked_vals = np.where(unexplored_mask, self.word_vals, -np.inf)
+                self.word_vals = np.random.rand(self.n_words) * selection_weights
+                masked_vals = np.where(explored_mask == 0, self.word_vals, -np.inf)
                 self.current_index = int(np.argmax(masked_vals))        
         else:
             #mode to just loop through all words
             self.current_index = self.index % self.n_words # ignore ai and go through words in order
-        self.current_index = 620
         self.new_index_time = time.time()
         self.check_typing_start = True
 
@@ -877,18 +1131,75 @@ class SRS:
                 self.screen.blit(label_surf, label_rect)
 
 
-
+        #* draw buttons
         # open settings
         self.draw_button(self.settings_button, self.settings_button_hover, self.settings_clicked, image="settings_button.png")
 
-        # select other folder
-        self.draw_button(self.folder_button,  self.folder_button_hover, False, image="folder_button.png")
+        if not self.settings_clicked:
+            # edit prev word
+            self.draw_button(self.edit_button, self.edit_button_hover, False, image="edit_button.png")
+        else:
+            # loop through words
+            self.draw_button(self.loop_button, self.loop_button_hover, self.ignore_ai, image="loop_button.png")
 
-        # edit prev word
-        self.draw_button(self.edit_button, self.edit_button_hover, False, image="edit_button.png")
+            # use Gaussian weights for the next word selection
+            self.draw_button(self.gaussian_button, self.gaussian_button_hover, self.use_gaussian, label="GAUSS")
 
-        # loop through words
-        self.draw_button(self.loop_button, self.loop_button_hover, self.ignore_ai, image="loop_button.png")
+            if not self.is_linux:
+                # select other folder
+                self.draw_button(self.folder_button,  self.folder_button_hover, False, image="folder_button.png")
+
+        #* draw sliders
+        if self.settings_clicked:
+            self.draw_slider(
+                self.timer_min_slider_rect,
+                min_timer,
+                min_timer_min,
+                min_timer_max,
+                "Min timer",
+                integer_value=True,
+                snap_values=[5, 10, 15, 20, 25, 30],
+                align_left=True,
+                label_offset=int(0.07 * window_scale),
+            )
+            self.draw_slider(
+                self.starting_cap_slider_rect,
+                starting_cap,
+                0,
+                max(0, (word_cap if word_cap > 0 else self.total_words - 1) - 2),
+                "First word",
+                value_text=f"({starting_cap}) {self.get_word_preview(starting_cap)}",
+                integer_value=True,
+                align_left=True,
+                label_offset=int(0.07 * window_scale),
+            )
+            self.draw_slider(
+                self.word_cap_slider_rect,
+                word_cap if word_cap > 0 else self.total_words - 1,
+                starting_cap + 2,
+                self.total_words - 1,
+                "Last word",
+                value_text=f"({word_cap if word_cap > 0 else self.total_words - 1}) {self.get_word_preview(word_cap if word_cap > 0 else self.total_words - 1)}",
+                integer_value=True,
+                align_left=True,
+                label_offset=int(0.07 * window_scale),
+            )
+            self.draw_exploration_slider()
+            self.draw_timer_slider()
+            self.draw_button(self.start_button, self.start_button_hover, False, label="Start")
+
+        #* draw hovering messages after:
+        if self.settings_button_hover:
+            self.draw_tooltip(self.button_tooltips["settings"])
+        elif self.settings_clicked:
+            if self.loop_button_hover:
+                self.draw_tooltip(self.button_tooltips["loop"])
+            elif self.gaussian_button_hover:
+                self.draw_tooltip(self.button_tooltips["gaussian"])
+            elif not self.is_linux and self.folder_button_hover:
+                self.draw_tooltip(self.button_tooltips["folder"])
+        elif self.edit_button_hover:
+            self.draw_tooltip(self.button_tooltips["edit"])
 
     def rewrite_line(self, line, replacement, file):
         with open(file, "r", encoding="utf-8") as f:
@@ -964,7 +1275,7 @@ class SRS:
         if len(points) > 1:
             pygame.draw.lines(surface, color, False, points, self.coordinate_system_line_thickness)
 
-    def draw_button(self, rect, hover, pressed, image):
+    def draw_button(self, rect, hover, pressed, image=None, label=None):
         if pressed:
             color = self.BUTTON_CLICKED_HOVER if hover else self.BUTTON_CLICKED
         else:
@@ -972,7 +1283,120 @@ class SRS:
 
         pygame.draw.rect(self.screen, color, rect, border_radius=int(border_radius_ratio*window_scale))
 
-        self.load_image(image, rect)
+        if image:
+            self.load_image(image, rect)
+        elif label:
+            label_surface = self.gaussian_font.render(label, True, self.BUTTON_TEXT)
+            label_rect = label_surface.get_rect(center=rect.center)
+            self.screen.blit(label_surface, label_rect)
+
+    def draw_exploration_slider(self):
+        self.draw_slider(
+            self.exploration_slider_rect,
+            self.exploration_factor,
+            exploration_factor_min,
+            exploration_factor_max,
+            "Exploration",
+            ["very low", "low", "normal", "high", "very high"],
+            [0.5, 0.75, 1.0, 1.25, 1.5],
+            align_left=True,
+            label_offset=int(0.07 * window_scale),
+        )
+
+    def draw_timer_slider(self):
+        self.draw_slider(
+            self.timer_slider_rect,
+            len_timer,
+            len_timer_min,
+            len_timer_max,
+            "Timer",
+            ["very slow", "slow", "normal", "fast", "very fast"],
+            [0, 15, 30, 45, 60],
+            align_left=True,
+            label_offset=int(0.07 * window_scale),
+        )
+
+    def get_word_preview(self, word_index):
+        word = self.all_l1[word_index]
+        preview = word[:8]
+        return f"{preview}.." if len(word) > 8 else preview
+
+    def draw_slider(self, slider_rect, value, minimum, maximum, label, levels=None, snap_values=None, integer_value=False, value_text=None, align_left=False, label_offset=None):
+        slider_ratio = 0.5 if maximum <= minimum else (value - minimum) / (maximum - minimum)
+        handle_x = int(slider_rect.left + slider_ratio * slider_rect.width)
+        slider_y = slider_rect.centery
+        line_width = max(1, int(0.03 * window_scale))
+        handle_radius = max(1, int(0.04 * window_scale))
+
+        pygame.draw.line(self.screen, self.COORDINATE_SYSTEM, slider_rect.midleft, slider_rect.midright, line_width)
+        if snap_values:
+            for snap_value in snap_values:
+                snap_ratio = (snap_value - minimum) / (maximum - minimum)
+                snap_x = int(slider_rect.left + snap_ratio * slider_rect.width)
+                pygame.draw.circle(self.screen, self.COORDINATE_SYSTEM, (snap_x, slider_y), max(1, int(0.03 * window_scale)))
+        pygame.draw.circle(self.screen, self.COORDINATE_SYSTEM_GRAPH, (handle_x, slider_y), handle_radius)
+
+        direction_font = self.gaussian_font
+        minus_surface = direction_font.render("-", True, self.TEXT)
+        plus_surface = direction_font.render("+", True, self.TEXT)
+        self.screen.blit(minus_surface, minus_surface.get_rect(center=(slider_rect.left, slider_y)))
+        self.screen.blit(plus_surface, plus_surface.get_rect(center=(slider_rect.right, slider_y)))
+
+        if value_text is not None:
+            display_value = value_text
+        elif levels:
+            display_value = self.get_slider_level(value, minimum, maximum, levels)
+        elif integer_value:
+            display_value = str(round(value))
+        else:
+            display_value = f"{value:.2f}"
+        label_surface = self.gaussian_font.render(f"{label}: {display_value}", True, self.TEXT)
+        label_y = slider_rect.bottom + (label_offset if label_offset is not None else int(0.02 * window_scale))
+        if align_left:
+            label_rect = label_surface.get_rect(midleft=(slider_rect.left, label_y))
+        else:
+            label_rect = label_surface.get_rect(midtop=(slider_rect.centerx, label_y))
+        self.screen.blit(label_surface, label_rect)
+
+    def get_slider_level(self, value, minimum, maximum, levels):
+        level_width = (maximum - minimum) / len(levels)
+        level_index = int((value - minimum) / level_width)
+        level_index = max(0, min(level_index, len(levels) - 1))
+        return levels[level_index]
+
+    def draw_tooltip(self, text):
+        if not text:
+            return
+
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+        max_width = int(self.WIDTH * 0.33)
+        words = text.split()
+        lines = []
+        current_line = ""
+
+        for word in words:
+            candidate = f"{current_line} {word}".strip()
+            if current_line and self.gaussian_font.size(candidate)[0] > max_width:
+                lines.append(current_line)
+                current_line = word
+            else:
+                current_line = candidate
+        if current_line:
+            lines.append(current_line)
+
+        padding = int(0.04 * window_scale)
+        line_height = self.gaussian_font.get_linesize()
+        tooltip_width = max(self.gaussian_font.size(line)[0] for line in lines) + 2 * padding
+        tooltip_height = len(lines) * line_height + 2 * padding
+        tooltip_x = min(mouse_x + 12, self.WIDTH - tooltip_width - padding)
+        tooltip_y = min(mouse_y + 12, self.HEIGHT - tooltip_height - padding)
+        tooltip_rect = pygame.Rect(tooltip_x, tooltip_y, tooltip_width, tooltip_height)
+
+        pygame.draw.rect(self.screen, self.LIGHT, tooltip_rect, border_radius=int(border_radius_ratio * window_scale))
+        for line_number, line in enumerate(lines):
+            line_surface = self.gaussian_font.render(line, True, self.BUTTON_TEXT)
+            line_position = (tooltip_x + padding, tooltip_y + padding + line_number * line_height)
+            self.screen.blit(line_surface, line_position)
 
     def load_image(self, image, rect):
         if image not in self.image_cache:
@@ -1049,12 +1473,15 @@ class SRS:
         self.normalization_stats = pd.read_csv(f"data/normalization_stats.csv", header=None).values
 
     def df_tensor_add_missing_rows(self):
-        rows = pd.DataFrame([[0.0]*len(feature_columns) for _ in range(self.n_words)])
-        pd.DataFrame(rows).to_csv(f"sets/{self.folder}/data.csv", mode="a", index=False, header=feature_columns)
+        header = feature_columns if len(self.df) == 0 else False
+        rows = pd.DataFrame([[0.0]*len(feature_columns) for _ in range(self.n_words-len(self.df))])
+        pd.DataFrame(rows).to_csv(f"sets/{self.folder}/data.csv", mode="a", index=False, header=header)
         self.init_df_tensor()
 
     def init_df_tensor(self):
         df = pd.read_csv(f"sets/{self.folder}/data.csv", header=0)
+        last_word_index = word_cap if word_cap > 0 else self.total_words - 1
+        df = df.iloc[starting_cap:last_word_index + 1].reset_index(drop=True)
         # reset occurrences in session and save as self.df
         self.df = self.set_row_val(df, 0, 0.0)
         # also reset session ema
