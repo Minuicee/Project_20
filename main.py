@@ -11,13 +11,10 @@ import time
 import math
 import sys
 import os
+import random
 
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
-
-# TODO intervall timer
-# TODO less padding between sliders
-# TODO add text for shortcuts
 
 # TODO change gaussian range!!!
 
@@ -27,7 +24,7 @@ print_data_tensor = True # saved data tensor after word input
 print_validation = False # explain systems choice to validate or invalidate users input
 print_normalized_df = False # complete data for nn
 print_exploration_chance = True
-print_exploration_validation = False
+print_exploration_validation = True
 print_expected_ema = False
     #gui
 window_scale = 200
@@ -36,18 +33,19 @@ width_ratio = 6
 height_ratio = 3 
 font_word_ratio = 0.3
 font_input_ratio = 0.2
-border_radius_ratio = 0.1 
+border_radius_ratio = 0.05 
 gaussian_font_ratio = 0.1
 axis_padding_ratio = 0.05
-button_padding = 0.45
+button_padding = 0.43
 first_button_padding = 0.05
+button_img_scale = 0.8
     #logic
 should_save = True
 word_cap = 0 # 0 means no cap. cant be bigger than n_words.
 starting_cap = 0 # first word index that may be shown
-len_timer = 30
+len_timer = 45
 len_timer_min = 0
-len_timer_max = 60
+len_timer_max = 90
 min_timer = 15
 min_timer_min = 5
 min_timer_max = 30
@@ -127,6 +125,15 @@ class SRS:
             # timers
         self.ticks = 0
         self.timer_running = False
+        self.settings_timer_state = "stopped"
+        self.settings_timer_remaining = 0.0
+        self.settings_timer_end_time = 0.0
+        self.settings_timer_duration = 0.0
+        self.settings_timer_ended_at = 0.0
+        self.timer_reveal_started_at = 0.0
+        self.timer_halfway_announced = False
+        self.timer_one_minute_announced = False
+        self.settings_closed_time = 0.0
         self.new_index_time = 0
         self.starting_time = 0
         self.inactive_ticks = 0
@@ -136,6 +143,8 @@ class SRS:
         self.typing_start = 0
         self.input_text = ""
         self.pause_triggered = False
+        self.pause_message = ""
+        self.has_shown_initial_pause_message = False
             # mouse / keyboard
         self.ctrl_hold = False
         self.mouse_hold = False
@@ -151,6 +160,9 @@ class SRS:
         self.settings_clicked = False
         self.editing_step = 0
         self.selected_focused_area = 0
+        self.ui_languages = ("en", "de")
+        self.ui_language_index = 0
+        self.ui_language = self.ui_languages[self.ui_language_index]
 
         # --- Plattform ---
         self.is_linux = False
@@ -175,8 +187,8 @@ class SRS:
 
         self.init_data_folder()
         self.init_user_data_info()
-        self.init_folder()
         self.init_set_config()
+        self.init_folder()
         self.init_data()
 
         self.trigger_pause()
@@ -247,46 +259,39 @@ class SRS:
         global focused_area
         global sigma_factor
         global min_timer
+        global starting_cap
+        global word_cap
+        global len_timer
 
-        try:
-            # init min gauss weights
-            with open(f"sets/{self.folder}/config/min_gauss_weights.csv", "r", encoding="utf-8") as f:
-                line = f.readline().strip()
-                min_gauss_weights = float(line)
+        config_dir = f"sets/{self.folder}/config"
+        os.makedirs(config_dir, exist_ok=True)
 
-            # init focused_area
-            with open(f"sets/{self.folder}/config/focused_area.csv", "r", encoding="utf-8") as f:
-                line = f.readline().strip()
-                focused_area = float(line)
+        def load_config_value(filename, value_type, default):
+            path = os.path.join(config_dir, filename)
+            try:
+                with open(path, "r", encoding="utf-8") as file:
+                    return value_type(file.readline().strip())
+            except (FileNotFoundError, ValueError):
+                with open(path, "w", encoding="utf-8") as file:
+                    file.write(f"{default}\n")
+                return default
 
-            # init sigma_factor
-            with open(f"sets/{self.folder}/config/sigma_factor.csv", "r", encoding="utf-8") as f:
-                line = f.readline().strip()
-                sigma_factor = float(line)
+        min_gauss_weights = load_config_value("min_gauss_weights.csv", float, std_min_gauss_weights)
+        focused_area = load_config_value("focused_area.csv", float, std_focused_area)
+        sigma_factor = load_config_value("sigma_factor.csv", float, std_sigma_factor)
+        starting_cap = load_config_value("starting_cap.csv", int, starting_cap)
+        word_cap = load_config_value("word_cap.csv", int, word_cap)
+        len_timer = load_config_value("len_timer.csv", int, len_timer)
+        self.exploration_factor = load_config_value("exploration_factor.csv", float, self.exploration_factor)
 
-            with open(f"sets/{self.folder}/config/min_timer.csv", "r", encoding="utf-8") as f:
-                line = f.readline().strip()
-                min_timer = float(line)
-
-        except FileNotFoundError:
-            os.makedirs(f"sets/{self.folder}/config", exist_ok=True)
-            min_timer = 15
-
-            # init new standard parameters
-            with open(f"sets/{self.folder}/config/sigma_factor.csv", "w", encoding="utf-8") as f:
-                    f.write(str(std_sigma_factor) + "\n")
-            with open(f"sets/{self.folder}/config/min_gauss_weights.csv", "w", encoding="utf-8") as f:
-                    f.write(str(std_min_gauss_weights) + "\n")
-            with open(f"sets/{self.folder}/config/focused_area.csv", "w", encoding="utf-8") as f:
-                    f.write(str(std_focused_area) + "\n")
-            with open(f"sets/{self.folder}/config/min_timer.csv", "w", encoding="utf-8") as f:
-                    f.write(str(min_timer) + "\n")
-
-            sigma_factor = std_sigma_factor
-            min_gauss_weights = std_min_gauss_weights
-            focused_area = std_focused_area
+    def save_set_config_value(self, filename, value):
+        config_dir = f"sets/{self.folder}/config"
+        os.makedirs(config_dir, exist_ok=True)
+        with open(os.path.join(config_dir, filename), "w", encoding="utf-8") as file:
+            file.write(f"{value}\n")
 
     def init_user_data_info(self):
+        os.makedirs("user_data", exist_ok=True)
         try:
             with open("user_data/folder.csv", "r", encoding="utf-8") as f:
                 line = f.readline().strip()
@@ -298,7 +303,14 @@ class SRS:
                 self.starting_time = self.get_scaled_time()
 
         except FileNotFoundError:
-            os.makedirs("user_data", exist_ok=True)
+            pass
+
+        try:
+            with open("user_data/language_index.csv", "r", encoding="utf-8") as f:
+                self.ui_language_index = int(f.readline().strip()) % len(self.ui_languages)
+        except (FileNotFoundError, ValueError):
+            self.save_ui_language()
+        self.ui_language = self.ui_languages[self.ui_language_index]
 
         if self.folder == "":
             self.prompt_folder()
@@ -384,22 +396,37 @@ class SRS:
         self.font_word = pygame.font.SysFont("calibri", int(font_word_ratio*window_scale))
         self.font_input = pygame.font.SysFont("calibri", int(font_input_ratio*window_scale))
         self.gaussian_font = pygame.font.SysFont("calibri", int(gaussian_font_ratio*window_scale))
+        self.help_font = pygame.font.SysFont("calibri", int(0.21 * window_scale), bold=False)
+        self.language_font = pygame.font.SysFont("calibri", int(0.13 * window_scale), bold=False)
 
         # Buttons in order
 
-        self.settings_button = pygame.Rect(self.get_button_x()*window_scale, 0.05*window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.edit_button = pygame.Rect(self.get_button_x(2)*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.loop_button = pygame.Rect(self.get_button_x()*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.gaussian_button = pygame.Rect(self.get_button_x()*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.folder_button = pygame.Rect(self.get_button_x()*window_scale, 0.05* window_scale, self.WIDTH // (width_ratio * button_scale),self.HEIGHT // (height_ratio * button_scale))
-        self.coordinate_system_rect = pygame.Rect(self.WIDTH // 7, self.HEIGHT // 5, self.WIDTH * 7 // 10, self.HEIGHT * 7 // 10)
+        button_width = self.WIDTH // (width_ratio * button_scale)
+        button_height = self.HEIGHT // (height_ratio * button_scale)
+        button_left = int(first_button_padding * window_scale)
+        button_top = int(first_button_padding * window_scale)
+        button_step = int(button_padding * window_scale)
+        self.settings_button = pygame.Rect(button_left, button_top, button_width, button_height)
+        self.edit_button = pygame.Rect(button_left + button_step, button_top, button_width, button_height)
+        self.gaussian_button = pygame.Rect(button_left, button_top + button_step, button_width, button_height)
+        self.loop_button = pygame.Rect(button_left, button_top + 2 * button_step, button_width, button_height)
+        self.folder_button = pygame.Rect(button_left, button_top + 3 * button_step, button_width, button_height)
+        self.language_button = pygame.Rect(button_left, button_top + 4 * button_step, button_width, button_height)
+        coordinate_system_width = self.WIDTH * 7 // 10
+        coordinate_system_height = self.HEIGHT * 7 // 10
+        self.coordinate_system_rect = pygame.Rect(
+            (self.WIDTH - coordinate_system_width) // 2,
+            self.HEIGHT // 5 + 15,
+            coordinate_system_width,
+            coordinate_system_height,
+        )
         slider_gap = int(0.04 * window_scale)
         slider_width = self.WIDTH // 6
         slider_height = int(0.1 * window_scale)
         slider_column_gap = int(0.225 * window_scale) + 25
-        right_slider_left = self.WIDTH * 4 // 5
-        middle_slider_left = right_slider_left - slider_width - slider_column_gap
+        middle_slider_left = (self.WIDTH - slider_width) // 2
         left_slider_left = middle_slider_left - slider_width - slider_column_gap
+        right_slider_left = middle_slider_left + slider_width + slider_column_gap
         self.exploration_slider_rect = pygame.Rect(
             middle_slider_left,
             slider_gap * 2,
@@ -424,20 +451,40 @@ class SRS:
             slider_width,
             slider_height,
         )
-        self.start_button = pygame.Rect(
-            self.timer_min_slider_rect.left,
-            self.timer_min_slider_rect.bottom + int(0.07 * window_scale) + self.gaussian_font.get_linesize() + slider_gap - 10,
-            slider_width,
-            int(0.18 * window_scale),
-        )
         self.word_cap_slider_rect = pygame.Rect(
             right_slider_left,
             self.timer_slider_rect.top,
             slider_width,
             slider_height,
         )
+        timer_button_gap = int(0.04 * window_scale)
+        timer_button_width = (slider_width - timer_button_gap) // 2
+        self.cancel_button = pygame.Rect(
+            self.timer_min_slider_rect.left,
+            self.timer_slider_rect.top,
+            timer_button_width,
+            slider_height * 2,
+        )
+        self.start_button = pygame.Rect(
+            self.cancel_button.right + timer_button_gap,
+            self.timer_slider_rect.top,
+            timer_button_width,
+            slider_height * 2,
+        )
+        self.help_button = pygame.Rect(
+            button_left,
+            button_top + 5 * button_step,
+            button_width,
+            button_height,
+        )
+        self.shortcut_overlay_rect = pygame.Rect(
+            self.WIDTH // 2 - int(1.4 * window_scale),
+            self.HEIGHT // 2 - int(0.95 * window_scale),
+            int(2.8 * window_scale),
+            int(1.9 * window_scale),
+        )
 
-        # colours
+        # colors
         self.DARK = "#0D0E29"
         self.LIGHT = "#CBCCF7"
         self.BLUE = "#57CFC9"
@@ -445,23 +492,39 @@ class SRS:
         self.RED = "#D42C2C"
         self.BACKGROUND = self.DARK
         self.TEXT = self.LIGHT
-        self.BUTTON_NORMAL = "#A67FEF"      # normal
-        self.BUTTON_HOVER = "#C2A6FF"       # hover
-        self.BUTTON_CLICKED = "#7A4CE6"     # clicked
-        self.BUTTON_CLICKED_HOVER = "#9460F0"  # clicked + hover
+        self.BUTTON_NORMAL = self.DARK      # normal
+        self.BUTTON_HOVER = "#393B6B"      # hover
+        self.BUTTON_CLICKED = "#7A7DBB"     # clicked
+        self.BUTTON_CLICKED_HOVER = "#9094EC"  # clicked + hover
         self.BUTTON_TEXT = "#130C1D"
-        self.button_tooltips = {
-            "settings": "Open settings",
-            "loop": "Ignore AI and loop through all words in order",
-            "gaussian": "Let selected gaussian curve affect AI",
-            "edit": "Edit recent word",
-            "folder": "Change dataset",
-        }
         self.COORDINATE_SYSTEM = "#1D3873"
         self.COORDINATE_SYSTEM_GRAPH = "#0DE5F0"
+        self.SLIDER_HANDLE = "#7A7DBB"
         self.GRID_COLOR = "#14264F"
+        self.TIMER_START_BORDER = "#28734B"
+        self.TIMER_STOP_BORDER = "#8A3B3B"
 
-        self.coordinate_system_line_thickness = 5
+        # tooltip settings
+        self.active_tooltip_text = None
+        self.tooltip_position = None
+        self.shortcuts_visible = False
+        self.tooltip_alpha = 0
+        self.tooltip_fade_speed = 28
+        self.tooltip_delay_ms = 500
+        self.tooltip_timer = 0
+        self.tooltip_mouse_pos = None
+        self.tooltip_stationary_ms = 0
+        self.coordinate_system_line_thickness = 2
+        self.button_tooltips = {
+            "settings": ("Open/Close settings", "Einstellungen öffnen/schließen"),
+            "help": ("Show keyboard shortcuts", "Tastenkürzel anzeigen"),
+            "language": ("Switch interface language", "Oberflächensprache wechseln"),
+            "loop": ("Ignore AI and loop through all words in order", "KI ignorieren und Wörter der Reihe nach lernen"),
+            "gaussian": ("Let selected gaussian curve affect AI", "Gewählte Gaußkurve für die KI verwenden"),
+            "edit": ("Edit last word", "Letztes Wort bearbeiten"),
+            "folder": ("Change dataset", "Datensatz wechseln"),
+            "start": ("Start a timer", "Timer starten"),
+        }
 
         self.clock = pygame.time.Clock()
 
@@ -471,6 +534,16 @@ class SRS:
         else:
             self.next_button_index += 1
             return (self.next_button_index - 1)*button_padding + first_button_padding
+
+    def get_ui_text(self, english, german):
+        return german if self.ui_language == "de" else english
+
+    def get_button_tooltip(self, button_name):
+        return self.button_tooltips[button_name][1 if self.ui_language == "de" else 0]
+
+    def save_ui_language(self):
+        with open("user_data/language_index.csv", "w", encoding="utf-8") as file:
+            file.write(f"{self.ui_language_index}\n")
 
 
     def run(self):
@@ -494,6 +567,11 @@ class SRS:
         found_keydown = False
 
         mouse_pos = pygame.mouse.get_pos()
+        if mouse_pos == self.tooltip_mouse_pos:
+            self.tooltip_stationary_ms += self.clock.get_time()
+        else:
+            self.tooltip_mouse_pos = mouse_pos
+            self.tooltip_stationary_ms = 0
         self.settings_button_hover = self.settings_button.collidepoint(mouse_pos)
         self.folder_button_hover = self.folder_button.collidepoint(mouse_pos)
         self.edit_button_hover = self.edit_button.collidepoint(mouse_pos)
@@ -503,6 +581,9 @@ class SRS:
         self.timer_slider_hover = self.timer_slider_rect.collidepoint(mouse_pos)
         self.timer_min_slider_hover = self.timer_min_slider_rect.collidepoint(mouse_pos)
         self.start_button_hover = self.start_button.collidepoint(mouse_pos)
+        self.cancel_button_hover = self.cancel_button.collidepoint(mouse_pos)
+        self.help_button_hover = self.help_button.collidepoint(mouse_pos)
+        self.language_button_hover = self.language_button.collidepoint(mouse_pos)
         self.starting_cap_slider_hover = self.starting_cap_slider_rect.collidepoint(mouse_pos)
         self.word_cap_slider_hover = self.word_cap_slider_rect.collidepoint(mouse_pos)
         self.coordinate_system_hover = mouse_pos if self.coordinate_system_rect.collidepoint(mouse_pos) else None
@@ -512,7 +593,17 @@ class SRS:
                 pygame.quit()
                 sys.exit()
 
-            elif event.type == pygame.KEYDOWN and not self.timer_running:
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE and self.shortcuts_visible:
+                    self.shortcuts_visible = False
+                    continue
+
+                if self.shortcuts_visible:
+                    continue
+
+                if self.timer_running:
+                    continue
+
                 if event.key == pygame.K_LCTRL:
                     self.ctrl_hold = True
 
@@ -523,8 +614,6 @@ class SRS:
                         self.trigger_settings_button()
                     elif event.key == pygame.K_e:
                         self.trigger_edit_button()
-                    elif event.key == pygame.K_s:
-                        self.trigger_pause()
                     elif event.key == pygame.K_l:
                         self.trigger_loop_button()
                     elif event.key == pygame.K_d:
@@ -533,6 +622,8 @@ class SRS:
                             self.last_index = -1
                             print()
                             print(f"..deleted word {self.l2[self.last_index]}..")
+                    elif event.key == pygame.K_t:
+                        self.trigger_gaussian_button()
                     elif event.key == pygame.K_BACKSPACE:
                         self.input_text = "" if self.input_text == "" else " ".join(self.input_text.split()[:-1])
 
@@ -571,7 +662,12 @@ class SRS:
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 self.mouse_hold = True
-                if self.settings_button_hover and not self.editing_step:
+                if self.help_button_hover:
+                    self.shortcuts_visible = not self.shortcuts_visible
+                elif self.shortcuts_visible:
+                    if not self.shortcut_overlay_rect.collidepoint(mouse_pos):
+                        self.shortcuts_visible = False
+                elif self.settings_button_hover and not self.editing_step:
                     self.trigger_settings_button()
 
                 elif self.settings_clicked and self.exploration_slider_hover:
@@ -588,12 +684,16 @@ class SRS:
                     self.update_timer_slider(mouse_pos[0])
 
                 elif self.settings_clicked and self.timer_min_slider_hover:
+                    if self.settings_timer_state != "stopped":
+                        self.stop_timer()
                     self.timer_min_slider_active = True
                     self.update_timer_min_slider(mouse_pos[0])
 
+                elif self.settings_clicked and self.cancel_button_hover:
+                    self.stop_timer()
+
                 elif self.settings_clicked and self.start_button_hover:
-                    #! add logic
-                    pass
+                    self.handle_start_button_click()
 
                 elif self.settings_clicked and self.starting_cap_slider_hover:
                     self.starting_cap_slider_active = True
@@ -605,6 +705,11 @@ class SRS:
 
                 elif self.settings_clicked and self.folder_button_hover and not self.is_linux:
                     self.trigger_folder_button()
+
+                elif self.settings_clicked and self.language_button_hover:
+                    self.ui_language_index = (self.ui_language_index + 1) % len(self.ui_languages)
+                    self.ui_language = self.ui_languages[self.ui_language_index]
+                    self.save_ui_language()
 
                 elif not self.settings_clicked and self.edit_button_hover and not self.last_index == -1:
                     self.trigger_edit_button()
@@ -631,26 +736,27 @@ class SRS:
                         exploration_factor_max,
                         [0.5, 0.75, 1.0, 1.25, 1.5],
                     )
+                    self.save_set_config_value("exploration_factor.csv", self.exploration_factor)
                 if self.timer_slider_active:
                     self.timer_value = self.snap_slider_value(
                         self.timer_value,
                         len_timer_min,
                         len_timer_max,
-                        [0, 15, 30, 45, 60],
+                        [0, 22.5, 45, 67.5, 90],
                     )
                     len_timer = round(self.timer_value)
+                    self.save_set_config_value("len_timer.csv", len_timer)
                 if self.timer_min_slider_active:
                     global min_timer
-                    min_timer = min(
-                        [5, 10, 15, 20, 25, 30],
-                        key=lambda value: abs(value - self.min_timer_value),
-                    )
-                    with open(f"sets/{self.folder}/config/min_timer.csv", "w", encoding="utf-8") as f:
-                        f.write(str(min_timer) + "\n")
+                    min_timer = self.round_to_nearest_step(self.min_timer_value, 5)
                 self.exploration_slider_active = False
                 self.timer_slider_active = False
                 self.timer_min_slider_active = False
                 caps_changed = self.starting_cap_slider_active or self.word_cap_slider_active
+                if self.starting_cap_slider_active:
+                    self.save_set_config_value("starting_cap.csv", starting_cap)
+                if self.word_cap_slider_active:
+                    self.save_set_config_value("word_cap.csv", word_cap)
                 self.starting_cap_slider_active = False
                 self.word_cap_slider_active = False
                 if caps_changed:
@@ -690,7 +796,7 @@ class SRS:
             
         if not found_keydown and not self.editing_step:
             self.inactive_ticks += 1
-        if self.inactive_ticks > max_inactive_ticks:
+        if self.inactive_ticks > max_inactive_ticks and not self.pause_triggered:
             self.trigger_pause()
 
     def trigger_folder_button(self):
@@ -700,6 +806,7 @@ class SRS:
     def trigger_settings_button(self):
         if self.settings_clicked:
             self.settings_clicked = False
+            self.settings_closed_time = time.time()
         else:
             self.settings_clicked = True
             self.get_new_gaussian = True
@@ -727,13 +834,15 @@ class SRS:
         self.use_gaussian = not self.use_gaussian
         self.trigger_pause()
 
-    def update_slider(self, slider_rect, minimum, maximum, mouse_x, snap_values=None):
+    def update_slider(self, slider_rect, minimum, maximum, mouse_x, snap_values=None, reverse=False):
         slider_left = slider_rect.left
         slider_right = slider_rect.right
         if maximum <= minimum:
             return minimum
         slider_ratio = (mouse_x - slider_left) / (slider_right - slider_left)
         slider_ratio = max(0.0, min(1.0, slider_ratio))
+        if reverse:
+            slider_ratio = 1.0 - slider_ratio
         value = minimum + slider_ratio * (maximum - minimum)
         if snap_values:
             return min(snap_values, key=lambda snap_value: abs(snap_value - value))
@@ -753,6 +862,7 @@ class SRS:
             len_timer_min,
             len_timer_max,
             mouse_x,
+            reverse=True,
         )
         global len_timer
         len_timer = round(self.timer_value)
@@ -764,6 +874,12 @@ class SRS:
             min_timer_max,
             mouse_x,
         )
+        global min_timer
+        min_timer = self.round_to_nearest_step(self.min_timer_value, 5)
+
+    def round_to_nearest_step(self, value, step):
+        rounded = int(round(value / step) * step)
+        return max(min_timer_min, min(min_timer_max, rounded))
 
     def update_starting_cap_slider(self, mouse_x):
         global starting_cap
@@ -796,6 +912,81 @@ class SRS:
     def trigger_pause(self):
         self.input_text = ""
         self.pause_triggered = True
+        self.pause_message = self.get_pause_message()
+
+    def get_pause_message(self):
+        if not self.has_shown_initial_pause_message:
+            self.has_shown_initial_pause_message = True
+            return self.get_ui_text("Press any key to proceed..", "Beliebige Taste drücken, um fortzufahren..")
+
+        # add phrases for every language
+        messages = {
+            "en": [
+                "Use the keyboard to get started.",
+                "Make a move to begin.",
+                "Ready when you are. Start typing.",
+                "Press a key and let us go.",
+                "Your next word is waiting.",
+                "Time to put the keyboard to work.",
+                "Start whenever you are ready.",
+                "One key is all it takes.",
+                "A small step starts the session.",
+                "Type your way into the next round.",
+            ],
+            "de": [
+                "Tastatur bedienen, um loszulegen.",
+                "Mach was, damit es losgehen kann.",
+                "Bereit? Fang an zu tippen.",
+                "Drücke eine Taste und weiter geht's.",
+                "Dein nächstes Wort wartet schon.",
+                "Zeit, die Tastatur einzusetzen.",
+                "Starte, sobald du bereit bist.",
+                "Eine Taste genügt.",
+                "Ein kleiner Schritt startet die Runde.",
+                "Tipp dich in die nächste Runde.",
+            ],
+        }
+        return random.choice(messages[self.ui_language])
+
+    def handle_start_button_click(self):
+        if self.settings_timer_state == "stopped":
+            self.settings_timer_state = "running"
+            self.settings_timer_remaining = float(min_timer * 60)
+            self.settings_timer_duration = self.settings_timer_remaining
+            self.settings_timer_end_time = time.time() + self.settings_timer_remaining
+            self.timer_halfway_announced = False
+            self.timer_one_minute_announced = False
+            self.input_text = ""
+            self.pause_triggered = False
+        elif self.settings_timer_state == "running":
+            self.settings_timer_state = "paused"
+            self.settings_timer_remaining = max(0.0, self.settings_timer_end_time - time.time())
+        elif self.settings_timer_state == "paused":
+            self.settings_timer_state = "running"
+            self.settings_timer_end_time = time.time() + self.settings_timer_remaining
+
+    def stop_timer(self):
+        self.settings_timer_state = "stopped"
+        self.settings_timer_remaining = 0.0
+        self.settings_timer_end_time = 0.0
+        self.settings_timer_duration = 0.0
+        self.settings_timer_ended_at = 0.0
+        self.timer_reveal_started_at = 0.0
+        self.timer_halfway_announced = False
+        self.timer_one_minute_announced = False
+
+    def get_remaining_timer_seconds(self):
+        if self.settings_timer_state == "running":
+            return max(0, int(self.settings_timer_end_time - time.time()))
+        elif self.settings_timer_state == "paused":
+            return max(0, int(self.settings_timer_remaining))
+        else:
+            return max(0, int(min_timer * 60))
+
+    def get_timer_display_text(self):
+        remaining_seconds = self.get_remaining_timer_seconds()
+        minutes, seconds = divmod(remaining_seconds, 60)
+        return f"{minutes:02d}:{seconds:02d}"
 
     def check_input(self): 
         correct = self.is_correct()
@@ -1053,12 +1244,12 @@ class SRS:
                 
             # decide what to display
             if self.editing_step == 1:
-                display_word = f"Edit source: {self.source[self.last_index]}"
+                display_word = f"{self.get_ui_text('Edit source', 'Quelle bearbeiten')}: {self.source[self.last_index]}"
             elif self.editing_step == 2:
-                display_word = f"Edit target: {self.target[self.last_index]}"
+                display_word = f"{self.get_ui_text('Edit target', 'Ziel bearbeiten')}: {self.target[self.last_index]}"
             else:
                 if self.pause_triggered:
-                    display_word = "Press any key to proceed.."
+                    display_word = self.pause_message
                 else:
                     display_word = self.source[self.current_index]
             word_surface = self.font_word.render(display_word, True, self.TEXT)
@@ -1135,29 +1326,33 @@ class SRS:
         # open settings
         self.draw_button(self.settings_button, self.settings_button_hover, self.settings_clicked, image="settings_button.png")
 
-        if not self.settings_clicked:
+        if not self.settings_clicked and self.last_index != -1:
             # edit prev word
             self.draw_button(self.edit_button, self.edit_button_hover, False, image="edit_button.png")
-        else:
+        elif self.settings_clicked:
+            self.draw_button(self.help_button, self.help_button_hover, self.shortcuts_visible, label="?", font=self.help_font, label_color="#FFFFFF")
+            # use Gaussian weights for the next word selection
+            self.draw_button(self.gaussian_button, self.gaussian_button_hover, self.use_gaussian, image="gauss_button.png")
+
             # loop through words
             self.draw_button(self.loop_button, self.loop_button_hover, self.ignore_ai, image="loop_button.png")
 
-            # use Gaussian weights for the next word selection
-            self.draw_button(self.gaussian_button, self.gaussian_button_hover, self.use_gaussian, label="GAUSS")
-
-            if not self.is_linux:
-                # select other folder
-                self.draw_button(self.folder_button,  self.folder_button_hover, False, image="folder_button.png")
+            # select other folder
+            self.draw_button(self.folder_button,  self.folder_button_hover, False, image="folder_button.png")
+            self.draw_button(self.language_button, self.language_button_hover, False, label=self.ui_language.upper(), font=self.language_font, label_color="#FFFFFF")
 
         #* draw sliders
         if self.settings_clicked:
+            is_timer_active = self.settings_timer_state in ("running", "paused")
+            timer_label = "            " if is_timer_active else self.get_ui_text("Set timer", "Timer einstellen")
             self.draw_slider(
                 self.timer_min_slider_rect,
                 min_timer,
                 min_timer_min,
                 min_timer_max,
-                "Min timer",
-                integer_value=True,
+                timer_label,
+                integer_value=not is_timer_active,
+                value_text=self.get_timer_display_text() if is_timer_active else None,
                 snap_values=[5, 10, 15, 20, 25, 30],
                 align_left=True,
                 label_offset=int(0.07 * window_scale),
@@ -1167,7 +1362,7 @@ class SRS:
                 starting_cap,
                 0,
                 max(0, (word_cap if word_cap > 0 else self.total_words - 1) - 2),
-                "First word",
+                self.get_ui_text("First word", "Erstes Wort"),
                 value_text=f"({starting_cap}) {self.get_word_preview(starting_cap)}",
                 integer_value=True,
                 align_left=True,
@@ -1178,7 +1373,7 @@ class SRS:
                 word_cap if word_cap > 0 else self.total_words - 1,
                 starting_cap + 2,
                 self.total_words - 1,
-                "Last word",
+                self.get_ui_text("Last word", "Letztes Wort"),
                 value_text=f"({word_cap if word_cap > 0 else self.total_words - 1}) {self.get_word_preview(word_cap if word_cap > 0 else self.total_words - 1)}",
                 integer_value=True,
                 align_left=True,
@@ -1186,20 +1381,132 @@ class SRS:
             )
             self.draw_exploration_slider()
             self.draw_timer_slider()
-            self.draw_button(self.start_button, self.start_button_hover, False, label="Start")
+            cancel_border_color = self.TIMER_STOP_BORDER if is_timer_active else self.COORDINATE_SYSTEM
+            self.draw_button(self.cancel_button, self.cancel_button_hover, False, image="stop_button.png", border=True, border_color=cancel_border_color, img_scale=1)
+            if self.settings_timer_state == "running":
+                button_image = "pause_button.png"
+                start_border_color = self.BLUE
+            else:
+                button_image = "start_button.png"
+                start_border_color = self.TIMER_START_BORDER
+            self.draw_button(self.start_button, self.start_button_hover, False, image=button_image, border=True, border_color=start_border_color, img_scale=1)
 
         #* draw hovering messages after:
+        hovered_tooltip = None
+        slider_tooltip = None
         if self.settings_button_hover:
-            self.draw_tooltip(self.button_tooltips["settings"])
+            hovered_tooltip = self.get_button_tooltip("settings")
         elif self.settings_clicked:
-            if self.loop_button_hover:
-                self.draw_tooltip(self.button_tooltips["loop"])
+            if self.help_button_hover:
+                hovered_tooltip = self.get_button_tooltip("help")
+            elif self.language_button_hover:
+                hovered_tooltip = self.get_button_tooltip("language")
+            elif self.cancel_button_hover:
+                hovered_tooltip = self.get_ui_text("Cancel timer", "Timer abbrechen")
+            elif self.start_button_hover:
+                if self.settings_timer_state == "running":
+                    hovered_tooltip = self.get_ui_text("Pause timer", "Timer pausieren")
+                elif self.settings_timer_state == "paused":
+                    hovered_tooltip = self.get_ui_text("Resume timer", "Timer fortsetzen")
+                else:
+                    hovered_tooltip = self.get_button_tooltip("start")
+            elif self.loop_button_hover:
+                hovered_tooltip = self.get_button_tooltip("loop")
             elif self.gaussian_button_hover:
-                self.draw_tooltip(self.button_tooltips["gaussian"])
-            elif not self.is_linux and self.folder_button_hover:
-                self.draw_tooltip(self.button_tooltips["folder"])
-        elif self.edit_button_hover:
-            self.draw_tooltip(self.button_tooltips["edit"])
+                hovered_tooltip = self.get_button_tooltip("gaussian")
+            elif self.folder_button_hover:
+                hovered_tooltip = self.get_button_tooltip("folder")
+            elif self.timer_min_slider_hover:
+                slider_tooltip = self.get_ui_text("Set the timer duration", "Timerdauer einstellen")
+            elif self.timer_slider_hover:
+                slider_tooltip = self.get_ui_text("Set how long the answer remains on screen", "Anzeigedauer der Antwort einstellen")
+            elif self.exploration_slider_hover:
+                slider_tooltip = self.get_ui_text("Adjust the probability to explore unseen words", "Wahrscheinlichkeit für unbekannte Wörter anpassen")
+            elif self.starting_cap_slider_hover:
+                slider_tooltip = self.get_ui_text("Choose the first word in the learning range", "Erstes Wort des Lernbereichs wählen")
+            elif self.word_cap_slider_hover:
+                slider_tooltip = self.get_ui_text("Choose the last word in the learning range", "Letztes Wort des Lernbereichs wählen")
+        elif self.last_index != -1 and self.edit_button_hover:
+            hovered_tooltip = self.get_button_tooltip("edit")
+
+        if slider_tooltip is not None and self.tooltip_stationary_ms >= self.tooltip_delay_ms:
+            hovered_tooltip = slider_tooltip
+
+        if hovered_tooltip is not None:
+            if self.active_tooltip_text != hovered_tooltip:
+                self.active_tooltip_text = hovered_tooltip
+                self.tooltip_position = None
+                self.tooltip_timer = 0
+                self.tooltip_alpha = 0
+
+            self.tooltip_timer += self.clock.get_time()
+            if self.tooltip_timer >= self.tooltip_delay_ms:
+                self.tooltip_alpha = min(255, self.tooltip_alpha + self.tooltip_fade_speed)
+        elif self.active_tooltip_text is not None:
+            self.tooltip_timer = 0
+            self.tooltip_alpha = max(0, self.tooltip_alpha - self.tooltip_fade_speed)
+            if self.tooltip_alpha == 0:
+                self.active_tooltip_text = None
+                self.tooltip_position = None
+
+        if self.active_tooltip_text is not None and self.tooltip_alpha > 0:
+            self.draw_tooltip(self.active_tooltip_text, self.tooltip_alpha)
+
+        if not self.settings_clicked and self.settings_timer_state in ("running", "paused", "ended"):
+            remaining = self.get_remaining_timer_seconds()
+            if remaining <= 0 and self.settings_timer_state == "running":
+                self.settings_timer_state = "ended"
+                self.settings_timer_ended_at = time.time()
+                self.settings_timer_remaining = 0.0
+                self.settings_timer_end_time = 0.0
+            elif self.settings_timer_state == "ended" and time.time() - self.settings_timer_ended_at >= 5.0:
+                self.stop_timer()
+            else:
+                timer_font = pygame.font.Font(pygame.font.get_default_font(), max(56, int(0.18 * window_scale)))
+                timer_text = self.get_ui_text("Timer ended", "Timer beendet") if self.settings_timer_state == "ended" else self.get_timer_display_text()
+                timer_surface = timer_font.render(timer_text, True, self.TEXT)
+                timer_rect = timer_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT * 3 // 16))
+                time_outside = time.time() - self.settings_closed_time
+                if time_outside < 1.0:
+                    base_alpha = 255
+                else:
+                    fade_time = time_outside - 1.0
+                    base_alpha = max(0, int(255 - fade_time * 200))
+
+                if self.settings_timer_state == "running" and remaining <= self.settings_timer_duration / 2 and not self.timer_halfway_announced:
+                    self.timer_halfway_announced = True
+                    self.timer_reveal_started_at = time.time()
+                if self.settings_timer_state == "running" and remaining <= 60 and not self.timer_one_minute_announced:
+                    self.timer_one_minute_announced = True
+                    self.timer_reveal_started_at = time.time()
+
+                mouse_x, mouse_y = pygame.mouse.get_pos()
+                dist = math.hypot(mouse_x - timer_rect.centerx, (mouse_y - timer_rect.centery) * 2)
+                inner_radius = max(88, int(0.35 * window_scale))
+                outer_radius = max(245, int(0.875 * window_scale))
+                if dist <= inner_radius:
+                    hover_alpha = 255
+                elif dist >= outer_radius:
+                    hover_alpha = 0
+                else:
+                    hover_alpha = int(255 * (1.0 - (dist - inner_radius) / (outer_radius - inner_radius)))
+
+                reveal_age = time.time() - self.timer_reveal_started_at
+                if self.settings_timer_state == "ended" or remaining <= 10:
+                    alert_alpha = 255
+                elif reveal_age <= 1.5:
+                    alert_alpha = 255
+                elif reveal_age <= 3.5:
+                    alert_alpha = int(255 * (1.0 - (reveal_age - 1.5) / 2.0))
+                else:
+                    alert_alpha = 0
+                alpha = max(base_alpha, hover_alpha, alert_alpha)
+                if alpha > 0:
+                    timer_surface.set_alpha(alpha)
+                    self.screen.blit(timer_surface, timer_rect)
+
+        if self.shortcuts_visible:
+            self.draw_shortcut_overlay()
 
     def rewrite_line(self, line, replacement, file):
         with open(file, "r", encoding="utf-8") as f:
@@ -1275,20 +1582,72 @@ class SRS:
         if len(points) > 1:
             pygame.draw.lines(surface, color, False, points, self.coordinate_system_line_thickness)
 
-    def draw_button(self, rect, hover, pressed, image=None, label=None):
+    def draw_button(self, rect, hover, pressed, image=None, label=None, border=False, border_color=None, img_scale=button_img_scale, font=None, label_color=None):
         if pressed:
             color = self.BUTTON_CLICKED_HOVER if hover else self.BUTTON_CLICKED
         else:
             color = self.BUTTON_HOVER if hover else self.BUTTON_NORMAL
 
         pygame.draw.rect(self.screen, color, rect, border_radius=int(border_radius_ratio*window_scale))
+        if border:
+            outline_color = border_color if border_color is not None else "#0B234F"
+            pygame.draw.rect(
+                self.screen,
+                outline_color,
+                rect,
+                width=max(1, int(0.012 * window_scale)),
+                border_radius=int(border_radius_ratio * window_scale),
+            )
 
         if image:
-            self.load_image(image, rect)
+            self.load_image(image, rect, img_scale)
         elif label:
-            label_surface = self.gaussian_font.render(label, True, self.BUTTON_TEXT)
+            label_surface = (font or self.gaussian_font).render(label, True, label_color or self.BUTTON_TEXT)
             label_rect = label_surface.get_rect(center=rect.center)
             self.screen.blit(label_surface, label_rect)
+
+    def draw_shortcut_overlay(self):
+        backdrop = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
+        backdrop.fill((0, 0, 0, 150))
+        self.screen.blit(backdrop, (0, 0))
+
+        panel = self.shortcut_overlay_rect
+        pygame.draw.rect(self.screen, "#171A3B", panel, border_radius=int(border_radius_ratio * window_scale))
+        pygame.draw.rect(
+            self.screen,
+            self.COORDINATE_SYSTEM,
+            panel,
+            width=max(1, int(0.012 * window_scale)),
+            border_radius=int(border_radius_ratio * window_scale),
+        )
+
+        title_font = pygame.font.Font(pygame.font.get_default_font(), max(24, int(0.13 * window_scale)))
+        row_font = pygame.font.Font(pygame.font.get_default_font(), max(16, int(0.075 * window_scale)))
+        title_surface = title_font.render(self.get_ui_text("Keyboard shortcuts", "Tastenkürzel"), True, self.TEXT)
+        self.screen.blit(title_surface, title_surface.get_rect(midtop=(panel.centerx, panel.top + int(0.12 * window_scale))))
+
+        shortcut_groups = [
+            (self.get_ui_text("General", "Allgemein"), [("Ctrl + G", self.get_ui_text("Open settings", "Einstellungen öffnen")), ("Ctrl + E", self.get_ui_text("Edit previous word", "Vorheriges Wort bearbeiten")), ("Ctrl + F", self.get_ui_text("Change dataset", "Datensatz wechseln")), ("Ctrl + D", self.get_ui_text("Delete recent word from dataset", "Letztes Wort aus dem Datensatz löschen"))]),
+            (self.get_ui_text("Toggle settings", "Einstellungen umschalten"), [("Ctrl + L", self.get_ui_text("Toggle word order", "Wortreihenfolge umschalten")), ("Ctrl + T", self.get_ui_text("Toggle Gaussian weights", "Gauß-Gewichte umschalten"))]),
+        ]
+        row_height = max(20, int(0.12 * window_scale))
+        group_gap = max(8, int(0.045 * window_scale))
+        content_left = panel.left + int(0.18 * window_scale)
+        shortcut_right = panel.centerx - int(0.10 * window_scale)
+        action_left = panel.centerx + int(0.10 * window_scale)
+        y = panel.top + int(0.38 * window_scale)
+
+        for group_name, shortcuts in shortcut_groups:
+            group_surface = self.gaussian_font.render(group_name, True, self.BLUE)
+            self.screen.blit(group_surface, group_surface.get_rect(topleft=(content_left, y)))
+            y += row_height
+            for shortcut, action in shortcuts:
+                shortcut_surface = row_font.render(shortcut, True, self.LIGHT)
+                action_surface = row_font.render(action, True, self.TEXT)
+                self.screen.blit(shortcut_surface, shortcut_surface.get_rect(right=shortcut_right, centery=y))
+                self.screen.blit(action_surface, action_surface.get_rect(left=action_left, centery=y))
+                y += row_height
+            y += group_gap
 
     def draw_exploration_slider(self):
         self.draw_slider(
@@ -1296,7 +1655,7 @@ class SRS:
             self.exploration_factor,
             exploration_factor_min,
             exploration_factor_max,
-            "Exploration",
+            self.get_ui_text("Exploration", "Erkundung"),
             ["very low", "low", "normal", "high", "very high"],
             [0.5, 0.75, 1.0, 1.25, 1.5],
             align_left=True,
@@ -1309,11 +1668,12 @@ class SRS:
             len_timer,
             len_timer_min,
             len_timer_max,
-            "Timer",
-            ["very slow", "slow", "normal", "fast", "very fast"],
-            [0, 15, 30, 45, 60],
+            self.get_ui_text("Timer", "Antwortzeit"),
+            ["very fast", "fast", "normal", "slow", "very slow"],
+            [0, 22.5, 45, 67.5, 90],
             align_left=True,
             label_offset=int(0.07 * window_scale),
+            reverse=True,
         )
 
     def get_word_preview(self, word_index):
@@ -1321,26 +1681,24 @@ class SRS:
         preview = word[:8]
         return f"{preview}.." if len(word) > 8 else preview
 
-    def draw_slider(self, slider_rect, value, minimum, maximum, label, levels=None, snap_values=None, integer_value=False, value_text=None, align_left=False, label_offset=None):
+    def draw_slider(self, slider_rect, value, minimum, maximum, label, levels=None, snap_values=None, integer_value=False, value_text=None, align_left=False, label_offset=None, reverse=False):
         slider_ratio = 0.5 if maximum <= minimum else (value - minimum) / (maximum - minimum)
+        if reverse:
+            slider_ratio = 1.0 - slider_ratio
         handle_x = int(slider_rect.left + slider_ratio * slider_rect.width)
         slider_y = slider_rect.centery
         line_width = max(1, int(0.03 * window_scale))
-        handle_radius = max(1, int(0.04 * window_scale))
+        handle_radius = max(1, int(0.035 * window_scale))
 
         pygame.draw.line(self.screen, self.COORDINATE_SYSTEM, slider_rect.midleft, slider_rect.midright, line_width)
         if snap_values:
             for snap_value in snap_values:
                 snap_ratio = (snap_value - minimum) / (maximum - minimum)
+                if reverse:
+                    snap_ratio = 1.0 - snap_ratio
                 snap_x = int(slider_rect.left + snap_ratio * slider_rect.width)
                 pygame.draw.circle(self.screen, self.COORDINATE_SYSTEM, (snap_x, slider_y), max(1, int(0.03 * window_scale)))
-        pygame.draw.circle(self.screen, self.COORDINATE_SYSTEM_GRAPH, (handle_x, slider_y), handle_radius)
-
-        direction_font = self.gaussian_font
-        minus_surface = direction_font.render("-", True, self.TEXT)
-        plus_surface = direction_font.render("+", True, self.TEXT)
-        self.screen.blit(minus_surface, minus_surface.get_rect(center=(slider_rect.left, slider_y)))
-        self.screen.blit(plus_surface, plus_surface.get_rect(center=(slider_rect.right, slider_y)))
+        pygame.draw.circle(self.screen, self.SLIDER_HANDLE, (handle_x, slider_y), handle_radius)
 
         if value_text is not None:
             display_value = value_text
@@ -1364,7 +1722,7 @@ class SRS:
         level_index = max(0, min(level_index, len(levels) - 1))
         return levels[level_index]
 
-    def draw_tooltip(self, text):
+    def draw_tooltip(self, text, alpha=255):
         if not text:
             return
 
@@ -1388,24 +1746,40 @@ class SRS:
         line_height = self.gaussian_font.get_linesize()
         tooltip_width = max(self.gaussian_font.size(line)[0] for line in lines) + 2 * padding
         tooltip_height = len(lines) * line_height + 2 * padding
-        tooltip_x = min(mouse_x + 12, self.WIDTH - tooltip_width - padding)
-        tooltip_y = min(mouse_y + 12, self.HEIGHT - tooltip_height - padding)
-        tooltip_rect = pygame.Rect(tooltip_x, tooltip_y, tooltip_width, tooltip_height)
+        if self.tooltip_position is None:
+            tooltip_x = min(mouse_x + 12, self.WIDTH - tooltip_width - padding)
+            tooltip_y = min(mouse_y + 12, self.HEIGHT - tooltip_height - padding)
+            self.tooltip_position = (tooltip_x, tooltip_y)
+        else:
+            tooltip_x, tooltip_y = self.tooltip_position
 
-        pygame.draw.rect(self.screen, self.LIGHT, tooltip_rect, border_radius=int(border_radius_ratio * window_scale))
+        tooltip_surface = pygame.Surface((tooltip_width, tooltip_height), pygame.SRCALPHA)
+        tooltip_rect = tooltip_surface.get_rect()
+        bg_color = pygame.Color("#585C87")
+        bg_color.a = int(alpha * 0.72)
+        pygame.draw.rect(tooltip_surface, bg_color, tooltip_rect, border_radius=int(border_radius_ratio * window_scale))
+
         for line_number, line in enumerate(lines):
-            line_surface = self.gaussian_font.render(line, True, self.BUTTON_TEXT)
-            line_position = (tooltip_x + padding, tooltip_y + padding + line_number * line_height)
-            self.screen.blit(line_surface, line_position)
+            line_surface = self.gaussian_font.render(line, True, "#FFFFFF")
+            line_surface.set_alpha(alpha)
+            line_position = (padding, padding + line_number * line_height)
+            tooltip_surface.blit(line_surface, line_position)
 
-    def load_image(self, image, rect):
+        self.screen.blit(tooltip_surface, (tooltip_x, tooltip_y))
+
+    def load_image(self, image, rect, img_scale):
         if image not in self.image_cache:
             img = pygame.image.load(f"img/{image}").convert_alpha()
             self.image_cache[image] = img
         else:
             img = self.image_cache[image]
 
-        img_scaled = pygame.transform.smoothscale(img, (rect.width*3//4, rect.height*3//4))
+        max_width = rect.width
+        max_height = rect.height
+        scale = min(max_width / img.get_width(), max_height / img.get_height())
+        draw_width = max(1, int(img.get_width() * scale))
+        draw_height = max(1, int(img.get_height() * scale))
+        img_scaled = pygame.transform.smoothscale(img, (int(draw_width*img_scale), int(draw_height*img_scale)))
         img_rect = img_scaled.get_rect(center=rect.center)
         self.screen.blit(img_scaled, img_rect)
 

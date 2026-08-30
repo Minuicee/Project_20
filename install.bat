@@ -29,6 +29,10 @@ powershell -Command "Invoke-WebRequest -Uri %BASE%/img/folder_button.png   -OutF
 powershell -Command "Invoke-WebRequest -Uri %BASE%/img/settings_button.png -OutFile img\settings_button.png -ErrorAction SilentlyContinue"
 powershell -Command "Invoke-WebRequest -Uri %BASE%/img/edit_button.png     -OutFile img\edit_button.png     -ErrorAction SilentlyContinue"
 powershell -Command "Invoke-WebRequest -Uri %BASE%/img/loop_button.png     -OutFile img\loop_button.png     -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri %BASE%/img/gauss_button.png     -OutFile img\gauss_button.png     -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri %BASE%/img/pause_button.png     -OutFile img\pause_button.png     -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri %BASE%/img/stop_button.png     -OutFile img\stop_button.png     -ErrorAction SilentlyContinue"
+powershell -Command "Invoke-WebRequest -Uri %BASE%/img/start_button.png     -OutFile img\start_button.png     -ErrorAction SilentlyContinue"
 
 
 :: ---------------------------------
