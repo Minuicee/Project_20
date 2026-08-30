@@ -922,28 +922,28 @@ class SRS:
         # add phrases for every language
         messages = {
             "en": [
-                "Use the keyboard to get started.",
-                "Make a move to begin.",
-                "Ready when you are. Start typing.",
-                "Press a key and let us go.",
-                "Your next word is waiting.",
-                "Time to put the keyboard to work.",
-                "Start whenever you are ready.",
-                "One key is all it takes.",
-                "A small step starts the session.",
-                "Type your way into the next round.",
+                "Use the keyboard to get started",
+                "Make a move to begin",
+                "Ready when you are. Start typing",
+                "Press a key and let us go",
+                "Your next word is waiting",
+                "Time to put the keyboard to work",
+                "Start whenever you are ready",
+                "One key is all it takes",
+                "A small step starts the session",
+                "Type your way into the next round",
             ],
             "de": [
-                "Tastatur bedienen, um loszulegen.",
-                "Mach was, damit es losgehen kann.",
-                "Bereit? Fang an zu tippen.",
-                "Drücke eine Taste und weiter geht's.",
-                "Dein nächstes Wort wartet schon.",
-                "Zeit, die Tastatur einzusetzen.",
-                "Starte, sobald du bereit bist.",
-                "Eine Taste genügt.",
-                "Ein kleiner Schritt startet die Runde.",
-                "Tipp dich in die nächste Runde.",
+                "Tastatur bedienen, um loszulegen",
+                "Mach was, damit es losgehen kann",
+                "Bereit? Fang an zu tippen",
+                "Drücke eine Taste und weiter geht's",
+                "Dein nächstes Wort wartet schon",
+                "Zeit, die Tastatur einzusetzen",
+                "Starte, sobald du bereit bist",
+                "Eine Taste genügt",
+                "Ein kleiner Schritt startet die Runde",
+                "Tipp dich in die nächste Runde",
             ],
         }
         return random.choice(messages[self.ui_language])
@@ -1324,7 +1324,10 @@ class SRS:
 
         #* draw buttons
         # open settings
-        self.draw_button(self.settings_button, self.settings_button_hover, self.settings_clicked, image="settings_button.png")
+        settings_button_alpha = 255
+        if not self.settings_clicked and self.settings_timer_state in ("running", "paused", "ended"):
+            settings_button_alpha = self.get_timer_visibility_alpha(self.settings_button, self.get_remaining_timer_seconds(), y_scale=1)
+        self.draw_button(self.settings_button, self.settings_button_hover, self.settings_clicked, image="settings_button.png", alpha=settings_button_alpha)
 
         if not self.settings_clicked and self.last_index != -1:
             # edit prev word
@@ -1344,7 +1347,7 @@ class SRS:
         #* draw sliders
         if self.settings_clicked:
             is_timer_active = self.settings_timer_state in ("running", "paused")
-            timer_label = "            " if is_timer_active else self.get_ui_text("Set timer", "Timer einstellen")
+            timer_label = "            " if is_timer_active else self.get_ui_text("Set timer", "    Timer einstellen")
             self.draw_slider(
                 self.timer_min_slider_rect,
                 min_timer,
@@ -1480,27 +1483,7 @@ class SRS:
                     self.timer_one_minute_announced = True
                     self.timer_reveal_started_at = time.time()
 
-                mouse_x, mouse_y = pygame.mouse.get_pos()
-                dist = math.hypot(mouse_x - timer_rect.centerx, (mouse_y - timer_rect.centery) * 2)
-                inner_radius = max(88, int(0.35 * window_scale))
-                outer_radius = max(245, int(0.875 * window_scale))
-                if dist <= inner_radius:
-                    hover_alpha = 255
-                elif dist >= outer_radius:
-                    hover_alpha = 0
-                else:
-                    hover_alpha = int(255 * (1.0 - (dist - inner_radius) / (outer_radius - inner_radius)))
-
-                reveal_age = time.time() - self.timer_reveal_started_at
-                if self.settings_timer_state == "ended" or remaining <= 10:
-                    alert_alpha = 255
-                elif reveal_age <= 1.5:
-                    alert_alpha = 255
-                elif reveal_age <= 3.5:
-                    alert_alpha = int(255 * (1.0 - (reveal_age - 1.5) / 2.0))
-                else:
-                    alert_alpha = 0
-                alpha = max(base_alpha, hover_alpha, alert_alpha)
+                alpha = self.get_timer_visibility_alpha(timer_rect, remaining, base_alpha)
                 if alpha > 0:
                     timer_surface.set_alpha(alpha)
                     self.screen.blit(timer_surface, timer_rect)
@@ -1582,29 +1565,60 @@ class SRS:
         if len(points) > 1:
             pygame.draw.lines(surface, color, False, points, self.coordinate_system_line_thickness)
 
-    def draw_button(self, rect, hover, pressed, image=None, label=None, border=False, border_color=None, img_scale=button_img_scale, font=None, label_color=None):
+    def get_timer_visibility_alpha(self, timer_rect, remaining, base_alpha=None, y_scale=2):
+        if base_alpha is None:
+            time_outside = time.time() - self.settings_closed_time
+            base_alpha = 255 if time_outside < 1.0 else max(0, int(255 - (time_outside - 1.0) * 200))
+
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+        dist = math.hypot(mouse_x - timer_rect.centerx, (mouse_y - timer_rect.centery) * y_scale)
+        inner_radius = max(88, int(0.35 * window_scale))
+        outer_radius = max(245, int(0.875 * window_scale))
+        if dist <= inner_radius:
+            hover_alpha = 255
+        elif dist >= outer_radius:
+            hover_alpha = 0
+        else:
+            hover_alpha = int(255 * (1.0 - (dist - inner_radius) / (outer_radius - inner_radius)))
+
+        reveal_age = time.time() - self.timer_reveal_started_at
+        if self.settings_timer_state == "ended" or remaining <= 10:
+            alert_alpha = 255
+        elif reveal_age <= 1.5:
+            alert_alpha = 255
+        elif reveal_age <= 3.5:
+            alert_alpha = int(255 * (1.0 - (reveal_age - 1.5) / 2.0))
+        else:
+            alert_alpha = 0
+        return max(base_alpha, hover_alpha, alert_alpha)
+
+    def draw_button(self, rect, hover, pressed, image=None, label=None, border=False, border_color=None, img_scale=button_img_scale, font=None, label_color=None, alpha=255):
         if pressed:
             color = self.BUTTON_CLICKED_HOVER if hover else self.BUTTON_CLICKED
         else:
             color = self.BUTTON_HOVER if hover else self.BUTTON_NORMAL
 
-        pygame.draw.rect(self.screen, color, rect, border_radius=int(border_radius_ratio*window_scale))
+        button_surface = pygame.Surface(rect.size, pygame.SRCALPHA)
+        button_rect = button_surface.get_rect()
+        pygame.draw.rect(button_surface, color, button_rect, border_radius=int(border_radius_ratio*window_scale))
         if border:
             outline_color = border_color if border_color is not None else "#0B234F"
             pygame.draw.rect(
-                self.screen,
+            button_surface,
                 outline_color,
-                rect,
+            button_rect,
                 width=max(1, int(0.012 * window_scale)),
                 border_radius=int(border_radius_ratio * window_scale),
             )
 
         if image:
-            self.load_image(image, rect, img_scale)
+            self.load_image(image, button_rect, img_scale, button_surface)
         elif label:
             label_surface = (font or self.gaussian_font).render(label, True, label_color or self.BUTTON_TEXT)
-            label_rect = label_surface.get_rect(center=rect.center)
-            self.screen.blit(label_surface, label_rect)
+            label_rect = label_surface.get_rect(center=button_rect.center)
+            button_surface.blit(label_surface, label_rect)
+        button_surface.set_alpha(alpha)
+        self.screen.blit(button_surface, rect)
 
     def draw_shortcut_overlay(self):
         backdrop = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
@@ -1627,8 +1641,8 @@ class SRS:
         self.screen.blit(title_surface, title_surface.get_rect(midtop=(panel.centerx, panel.top + int(0.12 * window_scale))))
 
         shortcut_groups = [
-            (self.get_ui_text("General", "Allgemein"), [("Ctrl + G", self.get_ui_text("Open settings", "Einstellungen öffnen")), ("Ctrl + E", self.get_ui_text("Edit previous word", "Vorheriges Wort bearbeiten")), ("Ctrl + F", self.get_ui_text("Change dataset", "Datensatz wechseln")), ("Ctrl + D", self.get_ui_text("Delete recent word from dataset", "Letztes Wort aus dem Datensatz löschen"))]),
-            (self.get_ui_text("Toggle settings", "Einstellungen umschalten"), [("Ctrl + L", self.get_ui_text("Toggle word order", "Wortreihenfolge umschalten")), ("Ctrl + T", self.get_ui_text("Toggle Gaussian weights", "Gauß-Gewichte umschalten"))]),
+            (self.get_ui_text("General", "Allgemein"), [("Ctrl + G", self.get_ui_text("Open settings", "Einstellungen öffnen")), ("Ctrl + E", self.get_ui_text("Edit previous word", "Vorheriges Wort bearbeiten")), ("Ctrl + F", self.get_ui_text("Change dataset", "Datensatz wechseln")), ("Ctrl + D", self.get_ui_text("Delete recent word from dataset", "Letztes Wort löschen"))]),
+            (self.get_ui_text("Toggle settings", "Einstellungen"), [("Ctrl + L", self.get_ui_text("Toggle word order", "Wortreihenfolge umschalten")), ("Ctrl + T", self.get_ui_text("Toggle Gaussian weights", "Gauß-Gewichte umschalten"))]),
         ]
         row_height = max(20, int(0.12 * window_scale))
         group_gap = max(8, int(0.045 * window_scale))
@@ -1767,7 +1781,7 @@ class SRS:
 
         self.screen.blit(tooltip_surface, (tooltip_x, tooltip_y))
 
-    def load_image(self, image, rect, img_scale):
+    def load_image(self, image, rect, img_scale, surface=None):
         if image not in self.image_cache:
             img = pygame.image.load(f"img/{image}").convert_alpha()
             self.image_cache[image] = img
@@ -1781,7 +1795,7 @@ class SRS:
         draw_height = max(1, int(img.get_height() * scale))
         img_scaled = pygame.transform.smoothscale(img, (int(draw_width*img_scale), int(draw_height*img_scale)))
         img_rect = img_scaled.get_rect(center=rect.center)
-        self.screen.blit(img_scaled, img_rect)
+        (surface or self.screen).blit(img_scaled, img_rect)
 
     def is_correct(self):
         # if the written words come up in the target assume it is a right answer
