@@ -12,6 +12,7 @@ import math
 import sys
 import os
 import random
+from datetime import datetime
 
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
@@ -102,9 +103,30 @@ short_form_translation = ["etw", "jmd"]
 ignore_words = ["der", "die", "das"] # german articles
 
 
+class OutputTee:
+
+    def __init__(self, terminal_stream, log_file):
+        self.terminal_stream = terminal_stream
+        self.log_file = log_file
+
+    def write(self, text):
+        self.terminal_stream.write(text)
+        self.log_file.write(text)
+
+    def flush(self):
+        self.terminal_stream.flush()
+        self.log_file.flush()
+
+
 class SRS:
 
     def __init__(self):
+        log_directory = "data/log"
+        os.makedirs(log_directory, exist_ok=True)
+        log_filename = datetime.now().strftime("session_%Y-%m-%d_%H-%M-%S.log")
+        self.log_file = open(os.path.join(log_directory, log_filename), "w", encoding="utf-8")
+        sys.stdout = OutputTee(sys.stdout, self.log_file)
+        sys.stderr = OutputTee(sys.stderr, self.log_file)
         pygame.init()
 
         # init variables
@@ -1169,7 +1191,7 @@ class SRS:
         print(f"Word distances: {distance}")
 
     def get_new_index(self):
-
+        exploitation_count_before_pause = self.exploitation_count
         if self.current_index != -1:
             self.last_index = self.current_index
 
@@ -1189,6 +1211,8 @@ class SRS:
                 self.word_vals = np.random.rand(self.n_words) * selection_weights
                 masked_vals = np.where(explored_mask == 0, self.word_vals, -np.inf)
                 self.current_index = int(np.argmax(masked_vals))        
+            if self.pause_triggered:
+                self.exploitation_count = exploitation_count_before_pause
         else:
             #mode to just loop through all words
             self.current_index = self.index % self.n_words # ignore ai and go through words in order
