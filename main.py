@@ -18,6 +18,7 @@ os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
 
 # TODO change gaussian range!!!
+# TODO rethink ai logic. what to predict?
 
 # parameters for dev
     #print
@@ -26,7 +27,6 @@ print_validation = True # explain systems choice to validate or invalidate users
 print_normalized_df = True # complete data for nn
 print_exploration_chance = True
 print_exploration_validation = True
-print_expected_ema = False
     #gui
 window_scale = 200
 button_scale = 2.5 #divides through button scale
@@ -567,7 +567,6 @@ class SRS:
         with open("user_data/language_index.csv", "w", encoding="utf-8") as file:
             file.write(f"{self.ui_language_index}\n")
 
-
     def run(self):
         self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
         pygame.display.set_caption("SRS")
@@ -1037,7 +1036,7 @@ class SRS:
         word_data = self.df.iloc[self.current_index] # currently saved data
 
         # only save data if word_data is not the init value
-        usable_for_ai = word_data.iloc[3] > 1
+        usable_for_ai = word_data.iloc[3] > 0
 
         if should_save:
             if usable_for_ai:
@@ -1056,12 +1055,14 @@ class SRS:
 
             # update session ema
             self.session_ema = self.get_ema(old_ema=self.session_ema, accuracy=correct_score)
+
+            #save new word_data tensor
             word_data.iloc[0] += 1.0 # occurrences in session (will be reset on new session)
             word_data.iloc[1] = time_since_last_seen # last seen (in hours)
             word_data.iloc[2] = float(self.index - word_data.iloc[8]) # last seen index
             word_data.iloc[3] += 1.0 # n reps
             word_data.iloc[4] = new_ema # exponentially moving average of accuracy
-            word_data.iloc[5] = correct_score # last correct 
+            word_data.iloc[5] = correct_score  
             word_data.iloc[6] = word_data.iloc[6]+1 if correct == 1.0 else 0.0 # correct streak
             word_data.iloc[7] = time_now_scaled # current time (in hours)
             word_data.iloc[8] = float(self.index) # current index
@@ -1081,8 +1082,8 @@ class SRS:
             pd.DataFrame(self.df).to_csv(f"sets/{self.folder}/data.csv", mode="w", index=False, header=feature_columns)
             
             if usable_for_ai:
-                # save reward resulting from old data
-                pd.DataFrame([self.get_reward(old_ema, new_ema, time_since_last_seen)]).to_csv("data/reward_data.csv", mode="a", index=False, header=False)
+                # save score resulting from old data
+                pd.DataFrame([correct_score]).to_csv("data/reward_data.csv", mode="a", index=False, header=False)
 
     def get_normalized_df(self, df=None, is_training=False):
         df = self.df if df is None else df
@@ -1121,12 +1122,6 @@ class SRS:
     
     def scale_time(self, x):
         return round(x/3600 - time_normalization, 4)
-
-    def get_reward(self, old_ema, new_ema, time_since_last_seen, decay_lambda=0.005):
-        expected_ema = old_ema * math.exp(-decay_lambda * time_since_last_seen)
-        if print_expected_ema:
-            print(f"expected ema: {expected_ema}")
-        return new_ema - expected_ema
 
     def save_sigma_factor(self, selected_sigma_factor):
         global sigma_factor
@@ -1200,7 +1195,7 @@ class SRS:
             selection_weights = self.gauss_distribution() if self.use_gaussian else np.ones(self.n_words)
             explored_mask = self.df.iloc[:, 3] != 0
             # determine whether to exploit or explore
-            if not self.should_explore():
+            if sum(explored_mask) == self.n_words or not self.should_explore():
                 self.exploitation_count += 1
                 self.word_vals = np.random.rand(self.n_words) * selection_weights #! change
                 masked_vals = np.where(explored_mask, self.word_vals, -np.inf)
@@ -1213,6 +1208,7 @@ class SRS:
                 self.current_index = int(np.argmax(masked_vals))        
             if self.pause_triggered:
                 self.exploitation_count = exploitation_count_before_pause
+
         else:
             #mode to just loop through all words
             self.current_index = self.index % self.n_words # ignore ai and go through words in order
@@ -1858,7 +1854,6 @@ class SRS:
 
         return [x for x in words if x not in ignore_words]
 
-
     def init_data(self):
         # init collected data
         try:
@@ -1939,4 +1934,3 @@ class SRS:
 if __name__ == "__main__":
     application = SRS()
     application.run()
-    
