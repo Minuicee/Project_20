@@ -18,7 +18,7 @@ os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
 
 # TODO change gaussian range!!!
-# TODO rethink ai logic. what to predict?
+# TODO rethink ai logic. what to predict? lower probability due to time?
 
 # parameters for dev
     #print
