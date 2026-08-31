@@ -1022,7 +1022,7 @@ class SRS:
         self.save_data(correct)
 
         self.timer_running = True
-        self.ticks = len_timer
+        self.ticks = len_timer if correct == 1 else len_timer * 2
         self.input_text = ""
 
     def increment_index(self):
