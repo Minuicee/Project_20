@@ -22,8 +22,8 @@ os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 # parameters for dev
     #print
 print_data_tensor = True # saved data tensor after word input
-print_validation = False # explain systems choice to validate or invalidate users input
-print_normalized_df = False # complete data for nn
+print_validation = True # explain systems choice to validate or invalidate users input
+print_normalized_df = True # complete data for nn
 print_exploration_chance = True
 print_exploration_validation = True
 print_expected_ema = False
@@ -1355,7 +1355,10 @@ class SRS:
 
         if not self.settings_clicked and self.last_index != -1:
             # edit prev word
-            self.draw_button(self.edit_button, self.edit_button_hover, False, image="edit_button.png")
+            edit_button_alpha = 255
+            if self.settings_timer_state in ("running", "paused", "ended"):
+                edit_button_alpha = self.get_timer_visibility_alpha(self.edit_button, self.get_remaining_timer_seconds(), y_scale=1)
+            self.draw_button(self.edit_button, self.edit_button_hover, False, image="edit_button.png", alpha=edit_button_alpha)
         elif self.settings_clicked:
             self.draw_button(self.help_button, self.help_button_hover, self.shortcuts_visible, label="?", font=self.help_font, label_color="#FFFFFF")
             # use Gaussian weights for the next word selection
