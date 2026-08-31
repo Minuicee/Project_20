@@ -307,6 +307,7 @@ class SRS:
         word_cap = load_config_value("word_cap.csv", int, word_cap)
         len_timer = load_config_value("len_timer.csv", int, len_timer)
         self.exploration_factor = load_config_value("exploration_factor.csv", float, self.exploration_factor)
+        self.translation_mode = load_config_value("translation_mode.csv", int, self.translation_mode)
 
     def save_set_config_value(self, filename, value):
         config_dir = f"sets/{self.folder}/config"
@@ -837,6 +838,7 @@ class SRS:
     def trigger_translation_mode_button(self):
         self.translation_mode = (self.translation_mode + 1) % 3
         self.apply_translation_mode()
+        self.save_set_config_value("translation_mode.csv", self.translation_mode)
         self.trigger_pause()
 
     def apply_translation_mode(self):
