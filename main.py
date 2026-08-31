@@ -185,6 +185,8 @@ class SRS:
         self.ui_languages = ("en", "de")
         self.ui_language_index = 0
         self.ui_language = self.ui_languages[self.ui_language_index]
+        self.translation_mode = 0  # 0=normal (l1->l2), 1=mixed, 2=reverse (l2->l1)
+        self.translation_mode_labels = ("→", "⇄", "←")
 
         # --- Plattform ---
         self.is_linux = False
@@ -397,6 +399,8 @@ class SRS:
 
             self.source = self.l1
             self.target = self.l2
+            if hasattr(self, 'translation_mode'):
+                self.apply_translation_mode()
 
             # if something is wrong with vocab data return with error
             if not len(self.l1) == len(self.l2):
@@ -432,8 +436,9 @@ class SRS:
         self.edit_button = pygame.Rect(button_left + button_step, button_top, button_width, button_height)
         self.gaussian_button = pygame.Rect(button_left, button_top + button_step, button_width, button_height)
         self.loop_button = pygame.Rect(button_left, button_top + 2 * button_step, button_width, button_height)
-        self.folder_button = pygame.Rect(button_left, button_top + 3 * button_step, button_width, button_height)
-        self.language_button = pygame.Rect(button_left, button_top + 4 * button_step, button_width, button_height)
+        self.translation_mode_button = pygame.Rect(button_left, button_top + 3 * button_step, button_width, button_height)
+        self.folder_button = pygame.Rect(button_left, button_top + 4 * button_step, button_width, button_height)
+        self.language_button = pygame.Rect(button_left, button_top + 5 * button_step, button_width, button_height)
         coordinate_system_width = self.WIDTH * 7 // 10
         coordinate_system_height = self.HEIGHT * 7 // 10
         self.coordinate_system_rect = pygame.Rect(
@@ -545,6 +550,7 @@ class SRS:
             "gaussian": ("Let selected gaussian curve affect AI", "Gewählte Gaußkurve für die KI verwenden"),
             "edit": ("Edit last word", "Letztes Wort bearbeiten"),
             "folder": ("Change dataset", "Datensatz wechseln"),
+            "translation_mode": ("Switch translation direction: normal / mixed / reverse", "Übersetzungsrichtung wechseln: normal / gemischt / umgekehrt"),
             "start": ("Start a timer", "Timer starten"),
         }
 
@@ -595,6 +601,7 @@ class SRS:
             self.tooltip_stationary_ms = 0
         self.settings_button_hover = self.settings_button.collidepoint(mouse_pos)
         self.folder_button_hover = self.folder_button.collidepoint(mouse_pos)
+        self.translation_mode_button_hover = self.translation_mode_button.collidepoint(mouse_pos)
         self.edit_button_hover = self.edit_button.collidepoint(mouse_pos)
         self.loop_button_hover = self.loop_button.collidepoint(mouse_pos)
         self.gaussian_button_hover = self.gaussian_button.collidepoint(mouse_pos)
@@ -727,6 +734,9 @@ class SRS:
                 elif self.settings_clicked and self.folder_button_hover and not self.is_linux:
                     self.trigger_folder_button()
 
+                elif self.settings_clicked and self.translation_mode_button_hover:
+                    self.trigger_translation_mode_button()
+
                 elif self.settings_clicked and self.language_button_hover:
                     self.ui_language_index = (self.ui_language_index + 1) % len(self.ui_languages)
                     self.ui_language = self.ui_languages[self.ui_language_index]
@@ -823,6 +833,20 @@ class SRS:
     def trigger_folder_button(self):
         self.prompt_folder()
         self.trigger_pause()
+
+    def trigger_translation_mode_button(self):
+        self.translation_mode = (self.translation_mode + 1) % 3
+        self.apply_translation_mode()
+        self.trigger_pause()
+
+    def apply_translation_mode(self):
+        if self.translation_mode == 0:  # normal: l1 -> l2
+            self.source = self.l1
+            self.target = self.l2
+        elif self.translation_mode == 2:  # reverse: l2 -> l1
+            self.source = self.l2
+            self.target = self.l1
+        # mode 1 (mixed) is handled per-word in get_new_index
 
     def trigger_settings_button(self):
         if self.settings_clicked:
@@ -1215,6 +1239,15 @@ class SRS:
         self.new_index_time = time.time()
         self.check_typing_start = True
 
+        # for mixed mode, randomly swap direction per word
+        if self.translation_mode == 1:
+            if random.random() < 0.5:
+                self.source = self.l1
+                self.target = self.l2
+            else:
+                self.source = self.l2
+                self.target = self.l1
+
     def should_explore(self):
         A = 4.8
         B = 4.7
@@ -1363,6 +1396,10 @@ class SRS:
             # loop through words
             self.draw_button(self.loop_button, self.loop_button_hover, self.ignore_ai, image="loop_button.png")
 
+            # translation mode (normal/mixed/reverse)
+            mode_active = self.translation_mode != 0
+            self.draw_button(self.translation_mode_button, self.translation_mode_button_hover, mode_active, label=self.translation_mode_labels[self.translation_mode], font=self.language_font, label_color="#FFFFFF")
+
             # select other folder
             self.draw_button(self.folder_button,  self.folder_button_hover, False, image="folder_button.png")
             self.draw_button(self.language_button, self.language_button_hover, False, label=self.ui_language.upper(), font=self.language_font, label_color="#FFFFFF")
@@ -1442,6 +1479,8 @@ class SRS:
                 hovered_tooltip = self.get_button_tooltip("gaussian")
             elif self.folder_button_hover:
                 hovered_tooltip = self.get_button_tooltip("folder")
+            elif self.translation_mode_button_hover:
+                hovered_tooltip = self.get_button_tooltip("translation_mode")
             elif self.timer_min_slider_hover:
                 slider_tooltip = self.get_ui_text("Set the timer duration", "Timerdauer einstellen")
             elif self.timer_slider_hover:
