@@ -18,10 +18,15 @@ os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
 
 # TODO change gaussian range!!!
+
 # TODO rethink ai logic. what to predict? lower probability due to time?
+# TODO datensatz editor
+# TODO mixed translation probability by avrg certainty
 
 # parameters for dev
     #print
+print_everything = False
+print_nothing = True    
 print_data_tensor = True # saved data tensor after word input
 print_validation = True # explain systems choice to validate or invalidate users input
 print_normalized_df = True # complete data for nn
@@ -127,6 +132,7 @@ class SRS:
         self.log_file = open(os.path.join(log_directory, log_filename), "w", encoding="utf-8")
         sys.stdout = OutputTee(sys.stdout, self.log_file)
         sys.stderr = OutputTee(sys.stderr, self.log_file)
+        self.set_print_statements()
         pygame.init()
 
         # init variables
@@ -217,38 +223,57 @@ class SRS:
 
         self.trigger_pause()
 
+    def set_print_statements(self):
+        global print_data_tensor, print_validation, print_normalized_df
+        global print_exploration_chance, print_exploration_validation
+
+        if print_everything or print_nothing:
+            enabled = print_everything
+            (
+                print_data_tensor,
+                print_validation,
+                print_normalized_df,
+                print_exploration_chance,
+                print_exploration_validation,
+            ) = (enabled,) * 5
+
+
     def delete_row(self, row_index):
-        row_index -= 1 #account css starting at 0
-        #Delete row at row_index from data, language1, and language2
-        files = [
-            f"sets/{self.folder}/data.csv",
+        if not 0 <= row_index < self.n_words:
+            print(f"Error: row_index {row_index} out of range")
+            return None
+
+        deleted_word = self.l2[row_index]
+        file_row_index = starting_cap + row_index
+        data_path = f"sets/{self.folder}/data.csv"
+        language_paths = [
             f"sets/{self.folder}/language1.csv",
             f"sets/{self.folder}/language2.csv",
         ]
 
-        for path in files:
-            with open(path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
+        with open(data_path, "r", encoding="utf-8") as file:
+            data_lines = file.readlines()
+        language_lines = []
+        for path in language_paths:
+            with open(path, "r", encoding="utf-8") as file:
+                language_lines.append(file.readlines())
 
-            is_csv_with_header = path.endswith(".csv")
+        if (
+            file_row_index + 1 >= len(data_lines)
+            or any(file_row_index >= len(lines) for lines in language_lines)
+        ):
+            print(f"Error: row_index {file_row_index} out of range in dataset")
+            return None
 
-            if is_csv_with_header:
-                header = lines[0]
-                data_lines = lines[1:]
-                if row_index >= len(data_lines):
-                    print(f"Error: row_index {row_index} out of range in {path}")
-                    return
-                del data_lines[row_index]
-                new_lines = [header] + data_lines
-            else:
-                if row_index >= len(lines):
-                    print(f"Error: row_index {row_index} out of range in {path}")
-                    return
-                del lines[row_index]
-                new_lines = lines
+        del data_lines[file_row_index + 1]
+        for lines in language_lines:
+            del lines[file_row_index]
 
-            with open(path, "w", encoding="utf-8") as f:
-                f.writelines(new_lines)
+        with open(data_path, "w", encoding="utf-8") as file:
+            file.writelines(data_lines)
+        for path, lines in zip(language_paths, language_lines):
+            with open(path, "w", encoding="utf-8") as file:
+                file.writelines(lines)
 
         # Keep in-memory data in sync
         if row_index < len(self.df):
@@ -259,7 +284,7 @@ class SRS:
             del self.l2[row_index]
 
         self.n_words = len(self.l1)
-        print(f"Deleted row {row_index}. Remaining words: {self.n_words}")
+        return deleted_word
 
     def check_os(self):
         # look if linux is used because filedialog doesnt properly work there
@@ -425,14 +450,17 @@ class SRS:
         self.gaussian_font = pygame.font.SysFont("calibri", int(gaussian_font_ratio*window_scale))
         self.help_font = pygame.font.SysFont("calibri", int(0.21 * window_scale), bold=False)
         self.language_font = pygame.font.SysFont("calibri", int(0.13 * window_scale), bold=False)
+        self.translation_mode_font = pygame.font.SysFont("calibri", int(0.2 * window_scale), bold=False)
 
         # Buttons in order
 
-        button_width = self.WIDTH // (width_ratio * button_scale)
-        button_height = self.HEIGHT // (height_ratio * button_scale)
-        button_left = int(first_button_padding * window_scale)
-        button_top = int(first_button_padding * window_scale)
-        button_step = int(button_padding * window_scale)
+        sidebar_button_count = 7
+        button_gap = self.HEIGHT // 50
+        button_height = (self.HEIGHT - (sidebar_button_count + 1) * button_gap) // sidebar_button_count
+        button_width = button_height
+        button_left = button_gap
+        button_top = button_gap
+        button_step = button_height + button_gap
         self.settings_button = pygame.Rect(button_left, button_top, button_width, button_height)
         self.edit_button = pygame.Rect(button_left + button_step, button_top, button_width, button_height)
         self.gaussian_button = pygame.Rect(button_left, button_top + button_step, button_width, button_height)
@@ -501,7 +529,7 @@ class SRS:
         )
         self.help_button = pygame.Rect(
             button_left,
-            button_top + 5 * button_step,
+            button_top + 6 * button_step,
             button_width,
             button_height,
         )
@@ -647,10 +675,10 @@ class SRS:
                         self.trigger_loop_button()
                     elif event.key == pygame.K_d:
                         if self.last_index != -1:
-                            self.delete_row(self.last_index)
+                            deleted_word = self.delete_row(self.last_index)
                             self.last_index = -1
-                            print()
-                            print(f"..deleted word {self.l2[self.last_index]}..")
+                            if deleted_word is not None:
+                                print(f"..deleted word {deleted_word}..")
                     elif event.key == pygame.K_t:
                         self.trigger_gaussian_button()
                     elif event.key == pygame.K_BACKSPACE:
@@ -840,6 +868,11 @@ class SRS:
         self.apply_translation_mode()
         self.save_set_config_value("translation_mode.csv", self.translation_mode)
         self.trigger_pause()
+        if self.translation_mode == 2 and set(self.l1).intersection(self.l2):
+            self.pause_message = self.get_ui_text(
+                "Warning: identical phrases exist in both languages",
+                "Warnung: Es gibt gleiche Phrasen in beiden Sprachen",
+            )
 
     def apply_translation_mode(self):
         if self.translation_mode == 0:  # normal: l1 -> l2
@@ -1051,7 +1084,6 @@ class SRS:
         self.input_text = ""
 
     def increment_index(self):
-        print(self.use_gaussian)
         self.index += 1
         with open("user_data/index.csv", "w", encoding="utf-8") as f:
             f.write(str(self.index) + "\n")
@@ -1218,20 +1250,25 @@ class SRS:
 
         # get new index
         if not self.ignore_ai:
+
             selection_weights = self.gauss_distribution() if self.use_gaussian else np.ones(self.n_words)
             explored_mask = self.df.iloc[:, 3] != 0
+
+
             # determine whether to exploit or explore
             if sum(explored_mask) == self.n_words or not self.should_explore():
                 self.exploitation_count += 1
                 self.word_vals = np.random.rand(self.n_words) * selection_weights #! change
-                masked_vals = np.where(explored_mask, self.word_vals, -np.inf)
-                self.current_index = int(np.argmax(masked_vals))
+                masked_vals = np.where(explored_mask, self.word_vals, 0.0)
+                self.current_index = self.get_random_from_probability(self.get_probablity(masked_vals))
 
             else:
                 self.exploitation_count = 0
                 self.word_vals = np.random.rand(self.n_words) * selection_weights
-                masked_vals = np.where(explored_mask == 0, self.word_vals, -np.inf)
-                self.current_index = int(np.argmax(masked_vals))        
+                masked_vals = np.where(explored_mask == 0, self.word_vals, 0)
+                self.current_index = self.get_random_from_probability(self.get_probablity(masked_vals))
+
+                        
             if self.pause_triggered:
                 self.exploitation_count = exploitation_count_before_pause
 
@@ -1249,6 +1286,17 @@ class SRS:
             else:
                 self.source = self.l2
                 self.target = self.l1
+
+    def get_probablity(self, x):
+        weights = np.asarray(x, dtype=float)
+        total_weight = weights.sum()
+        if total_weight <= 0:
+            raise ValueError("No eligible words available for selection")
+        return weights / total_weight
+
+    def get_random_from_probability(self, probability):
+        return int(np.searchsorted(np.cumsum(probability), np.random.random(), side="right"))
+
 
     def should_explore(self):
         A = 4.8
@@ -1400,7 +1448,7 @@ class SRS:
 
             # translation mode (normal/mixed/reverse)
             mode_active = self.translation_mode != 0
-            self.draw_button(self.translation_mode_button, self.translation_mode_button_hover, mode_active, label=self.translation_mode_labels[self.translation_mode], font=self.language_font, label_color="#FFFFFF")
+            self.draw_button(self.translation_mode_button, self.translation_mode_button_hover, mode_active, label=self.translation_mode_labels[self.translation_mode], font=self.translation_mode_font, label_color="#FFFFFF")
 
             # select other folder
             self.draw_button(self.folder_button,  self.folder_button_hover, False, image="folder_button.png")
