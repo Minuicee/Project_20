@@ -501,7 +501,7 @@ class SRS:
         )
         self.help_button = pygame.Rect(
             button_left,
-            button_top + 5 * button_step,
+            button_top + 6 * button_step,
             button_width,
             button_height,
         )
