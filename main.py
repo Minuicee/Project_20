@@ -26,7 +26,7 @@ os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 # parameters for dev
     #print
 print_everything = False
-print_nothing = True    
+print_nothing = False    
 print_data_tensor = True # saved data tensor after word input
 print_validation = True # explain systems choice to validate or invalidate users input
 print_normalized_df = True # complete data for nn
@@ -105,7 +105,8 @@ ai_input_columns =  [
     #support for german language
 short_form_list = [["etwas"], ["jemand", "jemandem", "jemanden"]]
 short_form_translation = ["etw", "jmd"]
-ignore_words = ["der", "die", "das"] # german articles
+ignore_words = ["der", "die", "das", # german articles
+                "el", "la"] # spanish articles
 
 
 class OutputTee:
@@ -244,7 +245,7 @@ class SRS:
             return None
 
         deleted_word = self.l2[row_index]
-        file_row_index = starting_cap + row_index
+        file_row_index = self.get_file_row_index(row_index)
         data_path = f"sets/{self.folder}/data.csv"
         language_paths = [
             f"sets/{self.folder}/language1.csv",
@@ -285,6 +286,9 @@ class SRS:
 
         self.n_words = len(self.l1)
         return deleted_word
+
+    def get_file_row_index(self, row_index):
+        return starting_cap + row_index
 
     def check_os(self):
         # look if linux is used because filedialog doesnt properly work there
@@ -698,11 +702,11 @@ class SRS:
                         if event.key == pygame.K_RETURN:
                             if self.input_text != "": #add a second if statement since we want it to do nothing if return is pressed but text is empty
                                 if self.editing_step == 1:
-                                    self.rewrite_line(self.last_index, self.input_text, f"sets/{self.folder}/language1.csv")
+                                    self.rewrite_line(self.get_file_row_index(self.last_index), self.input_text, f"sets/{self.folder}/language1.csv")
                                     self.input_text = self.target[self.last_index]
                                     self.editing_step = 2
                                 elif self.editing_step == 2:
-                                    self.rewrite_line(self.last_index, self.input_text, f"sets/{self.folder}/language2.csv")
+                                    self.rewrite_line(self.get_file_row_index(self.last_index), self.input_text, f"sets/{self.folder}/language2.csv")
                                     self.editing_step = 0
                                     self.input_text = ""
                                 else:
@@ -1093,8 +1097,8 @@ class SRS:
         # get old word data
         word_data = self.df.iloc[self.current_index] # currently saved data
 
-        # only save data if word_data is not the init value
-        usable_for_ai = word_data.iloc[3] > 0
+        # Save only after the first answer has established a valid last_seen interval.
+        usable_for_ai = word_data.iloc[3] > 1
 
         if should_save:
             if usable_for_ai:
@@ -1137,7 +1141,12 @@ class SRS:
             # save new word data in language data
             self.df.iloc[self.current_index] = word_data
 
-            pd.DataFrame(self.df).to_csv(f"sets/{self.folder}/data.csv", mode="w", index=False, header=feature_columns)
+            data_path = f"sets/{self.folder}/data.csv"
+            all_word_data = pd.read_csv(data_path, header=0)
+            first_file_row = self.get_file_row_index(0)
+            last_file_row = first_file_row + len(self.df)
+            all_word_data.iloc[first_file_row:last_file_row] = self.df.to_numpy()
+            all_word_data.to_csv(data_path, mode="w", index=False, header=feature_columns)
             
             if usable_for_ai:
                 # save score resulting from old data
@@ -1978,8 +1987,14 @@ class SRS:
         self.init_df_tensor()
 
     def init_df_tensor(self):
-        df = pd.read_csv(f"sets/{self.folder}/data.csv", header=0)
+        data_path = f"sets/{self.folder}/data.csv"
+        df = pd.read_csv(data_path, header=0)
         last_word_index = word_cap if word_cap > 0 else self.total_words - 1
+        if len(df) == self.n_words and self.n_words != self.total_words:
+            full_df = pd.DataFrame(0.0, index=range(self.total_words), columns=feature_columns)
+            full_df.iloc[starting_cap:last_word_index + 1] = df.to_numpy()
+            full_df.to_csv(data_path, index=False, header=feature_columns)
+            df = full_df
         df = df.iloc[starting_cap:last_word_index + 1].reset_index(drop=True)
         # reset occurrences in session and save as self.df
         self.df = self.set_row_val(df, 0, 0.0)
