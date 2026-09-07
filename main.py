@@ -4,9 +4,7 @@ import numpy as np
 import pygame
 
 #standard libraries
-import tkinter
-from tkinter import filedialog
-import platform
+import shutil
 import time
 import math
 import sys
@@ -14,14 +12,23 @@ import os
 import random
 from datetime import datetime
 
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
-
-# TODO change gaussian range!!!
-
-# TODO rethink ai logic. what to predict? lower probability due to time?
-# TODO datensatz editor
+# TODO change gaussian range
+# TODO make ai local
+# TODO data for reverse translation
+# TODO learning readiness / use data to predict learn span
+# TODO recency factor bis 3 wörter 100% exploration
 # TODO mixed translation probability by avrg certainty
+
+# TODO adjust size of text based on word size
+# TODO datensatz editor
+# TODO arrows for word cap
+# TODO resize window scale
+# TODO pause timer -> mouse movement/keybinding
+
+# TODO install all datasets
+# TODO windows mixerd translation icon
+# TODO slider very high
 
 # parameters for dev
     #print
@@ -194,9 +201,16 @@ class SRS:
         self.ui_language = self.ui_languages[self.ui_language_index]
         self.translation_mode = 0  # 0=normal (l1->l2), 1=mixed, 2=reverse (l2->l1)
         self.translation_mode_labels = ("→", "⇄", "←")
-
-        # --- Plattform ---
-        self.is_linux = False
+        self.manager_mode = None
+        self.manager_sets = []
+        self.manager_selected = 0
+        self.manager_scroll = 0
+        self.manager_input = ""
+        self.manager_edit_row = None
+        self.manager_edit_column = None
+        self.manager_rows = []
+        self.manager_drag_row = None
+        self.manager_message = ""
 
         # --- Gaussian/Weights ---
         self.get_new_gaussian = False
@@ -213,8 +227,6 @@ class SRS:
         self.session_ema = 0.5
 
         self.init_gui(width_ratio * window_scale, height_ratio * window_scale)
-
-        self.check_os()
 
         self.init_data_folder()
         self.init_user_data_info()
@@ -239,61 +251,212 @@ class SRS:
             ) = (enabled,) * 5
 
 
+    def get_set_paths(self, folder=None):
+        folder = folder or self.folder
+        base_path = os.path.join("sets", folder)
+        return (
+            os.path.join(base_path, "language1.csv"),
+            os.path.join(base_path, "language2.csv"),
+            os.path.join(base_path, "data.csv"),
+        )
+
+    def read_full_set(self, folder=None):
+        language1_path, language2_path, data_path = self.get_set_paths(folder)
+        with open(language1_path, "r", encoding="utf-8") as file:
+            language1 = [line.rstrip("\n") for line in file]
+        with open(language2_path, "r", encoding="utf-8") as file:
+            language2 = [line.rstrip("\n") for line in file]
+        if len(language1) != len(language2):
+            raise ValueError("language1.csv and language2.csv must have matching rows")
+        try:
+            data = pd.read_csv(data_path, header=0)
+        except (FileNotFoundError, pd.errors.EmptyDataError):
+            data = pd.DataFrame(columns=feature_columns)
+        data = data.reindex(columns=feature_columns, fill_value=0.0)
+        data = data.apply(pd.to_numeric, errors="coerce").fillna(0.0)
+        if len(data) < len(language1):
+            missing = pd.DataFrame(0.0, index=range(len(language1) - len(data)), columns=feature_columns)
+            data = pd.concat([data, missing], ignore_index=True)
+        return language1, language2, data.iloc[:len(language1)].reset_index(drop=True)
+
+    def write_full_set(self, language1, language2, data, folder=None):
+        if len(language1) != len(language2) or len(language1) != len(data):
+            raise ValueError("Vocabulary and learning data must have matching rows")
+        language1_path, language2_path, data_path = self.get_set_paths(folder)
+        with open(language1_path, "w", encoding="utf-8") as file:
+            file.writelines(f"{value.rstrip()}\n" for value in language1)
+        with open(language2_path, "w", encoding="utf-8") as file:
+            file.writelines(f"{value.rstrip()}\n" for value in language2)
+        data.reindex(columns=feature_columns, fill_value=0.0).to_csv(data_path, index=False, header=feature_columns)
+
+    def update_full_set_cell(self, row_index, column, value, folder=None):
+        language1, language2, data = self.read_full_set(folder)
+        values = language1 if column == 0 else language2
+        values[row_index] = value.replace("\x05", "").strip()
+        self.write_full_set(language1, language2, data, folder)
+
+    def discover_sets(self):
+        os.makedirs("sets", exist_ok=True)
+        return sorted(
+            name for name in os.listdir("sets")
+            if os.path.isdir(os.path.join("sets", name))
+            and all(os.path.isfile(path) for path in self.get_set_paths(name)[:2])
+        )
+
+    def refresh_manager_sets(self):
+        self.manager_sets = self.discover_sets()
+        if self.folder in self.manager_sets:
+            self.manager_selected = self.manager_sets.index(self.folder)
+        else:
+            self.manager_selected = min(self.manager_selected, max(0, len(self.manager_sets) - 1))
+
+    def select_set(self, folder):
+        language1, _, _ = self.read_full_set(folder)
+        if len(language1) < 2:
+            raise ValueError(self.get_ui_text("Add at least two rows before selecting this set", "Mindestens zwei Zeilen vor der Auswahl hinzufuegen"))
+        self.folder = folder
+        with open("user_data/folder.csv", "w", encoding="utf-8") as file:
+            file.write(f"{folder}\n")
+        self.init_set_config()
+        self.reload_active_set()
+
+    def create_set(self, name):
+        name = name.strip()
+        if not name or name in {".", ".."} or os.path.basename(name) != name:
+            raise ValueError(self.get_ui_text("Use a simple, unique set name", "Einen einfachen, eindeutigen Namen verwenden"))
+        if name in self.discover_sets() or os.path.exists(os.path.join("sets", name)):
+            raise ValueError(self.get_ui_text("This set already exists", "Dieser Datensatz existiert bereits"))
+        os.makedirs(os.path.join("sets", name))
+        self.write_full_set([], [], pd.DataFrame(columns=feature_columns), name)
+        previous_folder = self.folder
+        self.folder = name
+        self.init_set_config()
+        self.folder = previous_folder
+        self.refresh_manager_sets()
+        self.manager_selected = self.manager_sets.index(name)
+
+    def manager_selected_set(self):
+        return self.manager_sets[self.manager_selected] if self.manager_sets else None
+
+    def open_manager(self):
+        self.settings_clicked = False
+        self.editing_step = 0
+        self.trigger_pause()
+        self.manager_mode = "sets"
+        self.manager_message = ""
+        self.refresh_manager_sets()
+
+    def close_manager(self):
+        self.manager_mode = None
+        self.manager_input = ""
+        self.manager_edit_row = None
+        self.manager_drag_row = None
+        self.trigger_pause()
+
+    def open_manager_editor(self):
+        selected_set = self.manager_selected_set()
+        if selected_set is None:
+            return
+        self.manager_rows = list(zip(*self.read_full_set(selected_set)[:2]))
+        self.manager_scroll = 0
+        self.manager_mode = "editor"
+        self.manager_message = ""
+
+    def refresh_manager_rows(self):
+        selected_set = self.manager_selected_set()
+        if selected_set is not None:
+            self.manager_rows = list(zip(*self.read_full_set(selected_set)[:2]))
+        self.manager_scroll = min(self.manager_scroll, max(0, len(self.manager_rows) - self.manager_visible_rows()))
+
+    def reload_manager_set_if_active(self, folder):
+        if folder == self.folder:
+            self.reload_active_set()
+
+    def manager_visible_rows(self):
+        return max(1, self.manager_table_rect.height // self.manager_row_height)
+
+    def manager_add_row(self):
+        selected_set = self.manager_selected_set()
+        if selected_set is None:
+            return
+        language1, language2, data = self.read_full_set(selected_set)
+        insert_at = len(language1) if self.manager_edit_row is None else self.manager_edit_row + 1
+        language1.insert(insert_at, "")
+        language2.insert(insert_at, "")
+        data = pd.concat((data.iloc[:insert_at], pd.DataFrame([[0.0] * len(feature_columns)], columns=feature_columns), data.iloc[insert_at:]), ignore_index=True)
+        self.write_full_set(language1, language2, data, selected_set)
+        self.reload_manager_set_if_active(selected_set)
+        self.manager_edit_row = insert_at
+        self.manager_edit_column = 0
+        self.manager_input = ""
+        self.refresh_manager_rows()
+
+    def manager_delete_row(self, row_index):
+        selected_set = self.manager_selected_set()
+        language1, language2, data = self.read_full_set(selected_set)
+        if not 0 <= row_index < len(language1):
+            return
+        if selected_set == self.folder and len(language1) <= 2:
+            self.manager_message = self.get_ui_text("An active dataset needs at least two rows", "Ein aktiver Datensatz braucht mindestens zwei Zeilen")
+            return
+        language1.pop(row_index)
+        language2.pop(row_index)
+        self.write_full_set(language1, language2, data.drop(index=row_index).reset_index(drop=True), selected_set)
+        self.reload_manager_set_if_active(selected_set)
+        self.manager_edit_row = None
+        self.refresh_manager_rows()
+
+    def manager_move_row(self, source_index, target_index):
+        selected_set = self.manager_selected_set()
+        language1, language2, data = self.read_full_set(selected_set)
+        if source_index == target_index or not 0 <= target_index < len(language1):
+            return
+        for values in (language1, language2):
+            value = values.pop(source_index)
+            values.insert(target_index, value)
+        rows = data.to_numpy().tolist()
+        row = rows.pop(source_index)
+        rows.insert(target_index, row)
+        self.write_full_set(language1, language2, pd.DataFrame(rows, columns=feature_columns), selected_set)
+        self.reload_manager_set_if_active(selected_set)
+        self.manager_edit_row = target_index
+        self.refresh_manager_rows()
+
+    def reload_active_set(self):
+        global starting_cap, word_cap
+        language1, _, _ = self.read_full_set()
+        total_words = len(language1)
+        if total_words < 2:
+            starting_cap, word_cap = 0, 0
+        else:
+            starting_cap = min(max(0, starting_cap), total_words - 2)
+            last_word = total_words - 1 if word_cap == 0 else min(word_cap, total_words - 1)
+            word_cap = 0 if last_word == total_words - 1 else max(starting_cap + 1, last_word)
+        self.save_set_config_value("starting_cap.csv", starting_cap)
+        self.save_set_config_value("word_cap.csv", word_cap)
+        self.init_folder()
+        self.init_data()
+        self.current_index = -1
+        self.last_index = -1
+
     def delete_row(self, row_index):
         if not 0 <= row_index < self.n_words:
             print(f"Error: row_index {row_index} out of range")
             return None
-
-        deleted_word = self.l2[row_index]
         file_row_index = self.get_file_row_index(row_index)
-        data_path = f"sets/{self.folder}/data.csv"
-        language_paths = [
-            f"sets/{self.folder}/language1.csv",
-            f"sets/{self.folder}/language2.csv",
-        ]
-
-        with open(data_path, "r", encoding="utf-8") as file:
-            data_lines = file.readlines()
-        language_lines = []
-        for path in language_paths:
-            with open(path, "r", encoding="utf-8") as file:
-                language_lines.append(file.readlines())
-
-        if (
-            file_row_index + 1 >= len(data_lines)
-            or any(file_row_index >= len(lines) for lines in language_lines)
-        ):
-            print(f"Error: row_index {file_row_index} out of range in dataset")
+        language1, language2, data = self.read_full_set()
+        if len(language1) <= 2:
+            print("Error: an active dataset needs at least two rows")
             return None
-
-        del data_lines[file_row_index + 1]
-        for lines in language_lines:
-            del lines[file_row_index]
-
-        with open(data_path, "w", encoding="utf-8") as file:
-            file.writelines(data_lines)
-        for path, lines in zip(language_paths, language_lines):
-            with open(path, "w", encoding="utf-8") as file:
-                file.writelines(lines)
-
-        # Keep in-memory data in sync
-        if row_index < len(self.df):
-            self.df = self.df.drop(index=row_index).reset_index(drop=True)
-        if row_index < len(self.l1):
-            del self.l1[row_index]
-        if row_index < len(self.l2):
-            del self.l2[row_index]
-
-        self.n_words = len(self.l1)
+        deleted_word = language2.pop(file_row_index)
+        language1.pop(file_row_index)
+        data = data.drop(index=file_row_index).reset_index(drop=True)
+        self.write_full_set(language1, language2, data)
+        self.reload_active_set()
         return deleted_word
 
     def get_file_row_index(self, row_index):
         return starting_cap + row_index
-
-    def check_os(self):
-        # look if linux is used because filedialog doesnt properly work there
-        if platform.system().lower() == "linux":
-            self.is_linux = True
 
     def init_data_folder(self):
         os.makedirs("data", exist_ok=True)
@@ -366,38 +529,13 @@ class SRS:
             self.save_ui_language()
         self.ui_language = self.ui_languages[self.ui_language_index]
 
-        if self.folder == "":
-            self.prompt_folder()
-        # if no folder is found again, quit
-        if self.folder == "":
-            pygame.quit()
-
-    def prompt_folder(self):
-        root = tkinter.Tk()
-        root.withdraw()
-
-        start_dir = os.path.abspath("./sets")
-
-        tmp_folder = os.path.basename(filedialog.askdirectory(
-            title="Select file",
-            initialdir=start_dir
-        ))
-
-        if tmp_folder and tmp_folder != "sets":
-            self.folder = tmp_folder
-
-            with open("user_data/folder.csv", "w", encoding="utf-8") as f:
-                f.write(self.folder + "\n")
-
-            # init data again for new folder
-            self.init_set_config()
-            self.init_folder()
-            self.init_data()
-
-            self.last_index = -1
-
-
-        root.destroy()
+        if self.folder == "" or self.folder not in self.discover_sets():
+            available_sets = self.discover_sets()
+            if not available_sets:
+                raise RuntimeError("No valid dataset found in sets/")
+            self.folder = available_sets[0]
+            with open("user_data/folder.csv", "w", encoding="utf-8") as file:
+                file.write(f"{self.folder}\n")
 
     def init_folder(self):
         #init vocab and translation
@@ -543,6 +681,20 @@ class SRS:
             int(2.8 * window_scale),
             int(1.9 * window_scale),
         )
+        self.manager_rect = pygame.Rect(int(0.4 * window_scale), int(0.25 * window_scale), self.WIDTH - int(0.8 * window_scale), self.HEIGHT - int(0.5 * window_scale))
+        self.manager_list_rect = pygame.Rect(self.manager_rect.left + 20, self.manager_rect.top + 70, self.manager_rect.width // 3 - 30, self.manager_rect.height - 145)
+        self.manager_detail_rect = pygame.Rect(self.manager_list_rect.right + 20, self.manager_list_rect.top, self.manager_rect.right - self.manager_list_rect.right - 40, self.manager_list_rect.height)
+        self.manager_table_rect = pygame.Rect(self.manager_detail_rect.left, self.manager_detail_rect.top + 42, self.manager_detail_rect.width, self.manager_detail_rect.height - 42)
+        self.manager_row_height = max(28, int(0.17 * window_scale))
+        button_width = int(0.62 * window_scale)
+        button_height = int(0.23 * window_scale)
+        button_y = self.manager_rect.bottom - button_height - 18
+        self.manager_select_button = pygame.Rect(self.manager_rect.left + 20, button_y, button_width, button_height)
+        self.manager_edit_button = pygame.Rect(self.manager_select_button.right + 10, button_y, button_width, button_height)
+        self.manager_create_button = pygame.Rect(self.manager_edit_button.right + 10, button_y, button_width, button_height)
+        self.manager_delete_button = pygame.Rect(self.manager_create_button.right + 10, button_y, button_width, button_height)
+        self.manager_back_button = pygame.Rect(self.manager_rect.right - button_width - 20, button_y, button_width, button_height)
+        self.manager_add_button = pygame.Rect(self.manager_table_rect.right - button_width, self.manager_table_rect.top - 36, button_width, button_height)
 
         # colors
         self.DARK = "#0D0E29"
@@ -654,6 +806,10 @@ class SRS:
                 pygame.quit()
                 sys.exit()
 
+            if self.manager_mode is not None:
+                self.handle_manager_event(event, mouse_pos)
+                continue
+
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE and self.shortcuts_visible:
                     self.shortcuts_visible = False
@@ -764,7 +920,7 @@ class SRS:
                     self.word_cap_slider_active = True
                     self.update_word_cap_slider(mouse_pos[0])
 
-                elif self.settings_clicked and self.folder_button_hover and not self.is_linux:
+                elif self.settings_clicked and self.folder_button_hover:
                     self.trigger_folder_button()
 
                 elif self.settings_clicked and self.translation_mode_button_hover:
@@ -864,8 +1020,143 @@ class SRS:
             self.trigger_pause()
 
     def trigger_folder_button(self):
-        self.prompt_folder()
-        self.trigger_pause()
+        self.open_manager()
+
+    def manager_row_at(self, mouse_pos):
+        if not self.manager_table_rect.collidepoint(mouse_pos):
+            return None
+        row = self.manager_scroll + (mouse_pos[1] - self.manager_table_rect.top) // self.manager_row_height
+        return row if 0 <= row < len(self.manager_rows) else None
+
+    def handle_manager_event(self, event, mouse_pos):
+        if event.type == pygame.MOUSEWHEEL and self.manager_mode == "editor":
+            self.manager_scroll = max(0, min(max(0, len(self.manager_rows) - self.manager_visible_rows()), self.manager_scroll - event.y))
+            return
+
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                if self.manager_edit_row is not None:
+                    self.manager_edit_row = None
+                    self.manager_input = ""
+                elif self.manager_mode == "editor":
+                    self.manager_mode = "sets"
+                elif self.manager_mode in ("create", "confirm_delete"):
+                    self.manager_mode = "sets"
+                    self.manager_message = ""
+                else:
+                    self.close_manager()
+                return
+            if self.manager_mode == "create":
+                if event.key == pygame.K_RETURN:
+                    try:
+                        self.create_set(self.manager_input)
+                        self.manager_input = ""
+                        self.manager_mode = "sets"
+                    except ValueError as error:
+                        self.manager_message = str(error)
+                elif event.key == pygame.K_BACKSPACE:
+                    self.manager_input = self.manager_input[:-1]
+                elif event.unicode and event.unicode.isprintable():
+                    self.manager_input += event.unicode
+                return
+            if self.manager_mode == "confirm_delete":
+                if event.key in (pygame.K_RETURN, pygame.K_y):
+                    selected_set = self.manager_selected_set()
+                    if selected_set and len(self.manager_sets) > 1:
+                        was_active = selected_set == self.folder
+                        shutil.rmtree(os.path.join("sets", selected_set))
+                        self.refresh_manager_sets()
+                        if was_active:
+                            self.select_set(self.manager_selected_set())
+                        self.manager_mode = "sets"
+                    else:
+                        self.manager_message = self.get_ui_text("The final set cannot be deleted", "Der letzte Datensatz kann nicht geloescht werden")
+                        self.manager_mode = "sets"
+                return
+            if self.manager_mode == "sets":
+                if event.key == pygame.K_UP:
+                    self.manager_selected = max(0, self.manager_selected - 1)
+                elif event.key == pygame.K_DOWN:
+                    self.manager_selected = min(len(self.manager_sets) - 1, self.manager_selected + 1)
+                elif event.key == pygame.K_RETURN:
+                    selected_set = self.manager_selected_set()
+                    if selected_set:
+                        try:
+                            self.select_set(selected_set)
+                            self.manager_message = self.get_ui_text("Dataset selected", "Datensatz ausgewaehlt")
+                        except ValueError as error:
+                            self.manager_message = str(error)
+                return
+            if self.manager_mode == "editor":
+                if self.manager_edit_row is not None:
+                    if event.key == pygame.K_RETURN:
+                        selected_set = self.manager_selected_set()
+                        self.update_full_set_cell(self.manager_edit_row, self.manager_edit_column, self.manager_input, selected_set)
+                        self.reload_manager_set_if_active(selected_set)
+                        self.manager_edit_row = None
+                        self.manager_input = ""
+                        self.refresh_manager_rows()
+                    elif event.key == pygame.K_BACKSPACE:
+                        self.manager_input = self.manager_input[:-1]
+                    elif event.unicode and event.unicode.isprintable():
+                        self.manager_input += event.unicode
+                elif event.key == pygame.K_UP:
+                    self.manager_scroll = max(0, self.manager_scroll - 1)
+                elif event.key == pygame.K_DOWN:
+                    self.manager_scroll = min(max(0, len(self.manager_rows) - self.manager_visible_rows()), self.manager_scroll + 1)
+                elif event.key == pygame.K_DELETE and self.manager_edit_row is not None:
+                    self.manager_delete_row(self.manager_edit_row)
+                return
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.manager_back_button.collidepoint(mouse_pos):
+                if self.manager_mode == "editor":
+                    self.manager_mode = "sets"
+                else:
+                    self.close_manager()
+                return
+            if self.manager_mode == "sets":
+                if self.manager_list_rect.collidepoint(mouse_pos):
+                    row = (mouse_pos[1] - self.manager_list_rect.top) // self.manager_row_height
+                    if 0 <= row < len(self.manager_sets):
+                        self.manager_selected = row
+                elif self.manager_select_button.collidepoint(mouse_pos) and self.manager_selected_set():
+                    try:
+                        self.select_set(self.manager_selected_set())
+                        self.manager_message = self.get_ui_text("Dataset selected", "Datensatz ausgewaehlt")
+                    except ValueError as error:
+                        self.manager_message = str(error)
+                elif self.manager_edit_button.collidepoint(mouse_pos):
+                    self.open_manager_editor()
+                elif self.manager_create_button.collidepoint(mouse_pos):
+                    self.manager_mode = "create"
+                    self.manager_input = ""
+                elif self.manager_delete_button.collidepoint(mouse_pos) and self.manager_selected_set():
+                    self.manager_mode = "confirm_delete"
+                return
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3 and self.manager_mode == "editor":
+            row = self.manager_row_at(mouse_pos)
+            if row is not None:
+                self.manager_delete_row(row)
+            if self.manager_mode == "editor":
+                if self.manager_add_button.collidepoint(mouse_pos):
+                    self.manager_add_row()
+                    return
+                row = self.manager_row_at(mouse_pos)
+                if row is not None:
+                    column = 0 if mouse_pos[0] < self.manager_table_rect.centerx else 1
+                    self.manager_edit_row = row
+                    self.manager_edit_column = column
+                    self.manager_input = self.manager_rows[row][column]
+                    self.manager_drag_row = row
+                return
+
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.manager_mode == "editor":
+            target_row = self.manager_row_at(mouse_pos)
+            if self.manager_drag_row is not None and target_row is not None and target_row != self.manager_drag_row:
+                self.manager_move_row(self.manager_drag_row, target_row)
+            self.manager_drag_row = None
 
     def trigger_translation_mode_button(self):
         self.translation_mode = (self.translation_mode + 1) % 3
@@ -1343,6 +1634,9 @@ class SRS:
         normalized_df = self.get_normalized_df() #!
 
     def draw(self):
+        if self.manager_mode is not None:
+            self.draw_manager()
+            return
         if not self.settings_clicked:
             if self.timer_running:
                 if self.ticks == 0:
@@ -1613,12 +1907,91 @@ class SRS:
             self.draw_shortcut_overlay()
 
     def rewrite_line(self, line, replacement, file):
-        with open(file, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        replacement = replacement.replace("\x05", "")
-        lines[line] = replacement.rstrip("\n") + "\n"
-        with open(file, "w", encoding="utf-8") as f:
-            f.writelines(lines)
+        column = 0 if os.path.basename(file) == "language1.csv" else 1
+        self.update_full_set_cell(line, column, replacement)
+        self.reload_active_set()
+
+    def draw_manager(self):
+        backdrop = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
+        backdrop.fill((0, 0, 0, 175))
+        self.screen.blit(backdrop, (0, 0))
+        pygame.draw.rect(self.screen, "#171A3B", self.manager_rect, border_radius=int(border_radius_ratio * window_scale))
+        pygame.draw.rect(self.screen, self.COORDINATE_SYSTEM, self.manager_rect, width=2, border_radius=int(border_radius_ratio * window_scale))
+        title = self.get_ui_text("Dataset manager", "Datensatzverwaltung")
+        title_surface = self.help_font.render(title, True, self.TEXT)
+        self.screen.blit(title_surface, title_surface.get_rect(topleft=(self.manager_rect.left + 20, self.manager_rect.top + 18)))
+
+        if self.manager_mode == "confirm_delete":
+            selected_set = self.manager_selected_set() or ""
+            message = self.get_ui_text(f"Delete '{selected_set}'? Press Enter or Y to confirm.", f"'{selected_set}' loeschen? Enter oder Y zum Bestaetigen.")
+            self.draw_manager_message(message, self.manager_rect.centery)
+            self.draw_button(self.manager_back_button, False, False, label=self.get_ui_text("Cancel", "Abbrechen"), font=self.gaussian_font, label_color="#FFFFFF")
+            return
+
+        if self.manager_mode == "create":
+            prompt = self.get_ui_text("New dataset name", "Name des neuen Datensatzes")
+            self.draw_manager_message(prompt, self.manager_rect.centery - 36)
+            value_surface = self.font_input.render(f"{self.manager_input}_", True, self.TEXT)
+            self.screen.blit(value_surface, value_surface.get_rect(center=(self.manager_rect.centerx, self.manager_rect.centery + 20)))
+            self.draw_manager_message(self.get_ui_text("Enter to create, Escape to cancel", "Enter zum Erstellen, Escape zum Abbrechen"), self.manager_rect.centery + 70)
+            return
+
+        if self.manager_mode == "sets":
+            pygame.draw.rect(self.screen, self.GRID_COLOR, self.manager_list_rect, width=1)
+            list_title = self.gaussian_font.render(self.get_ui_text("Datasets", "Datensaetze"), True, self.BLUE)
+            self.screen.blit(list_title, (self.manager_list_rect.left, self.manager_list_rect.top - 26))
+            for index, name in enumerate(self.manager_sets):
+                row_rect = pygame.Rect(self.manager_list_rect.left, self.manager_list_rect.top + index * self.manager_row_height, self.manager_list_rect.width, self.manager_row_height)
+                if row_rect.bottom > self.manager_list_rect.bottom:
+                    break
+                if index == self.manager_selected:
+                    pygame.draw.rect(self.screen, self.BUTTON_CLICKED, row_rect)
+                text = self.gaussian_font.render(name, True, self.TEXT)
+                self.screen.blit(text, text.get_rect(midleft=(row_rect.left + 10, row_rect.centery)))
+            selected_set = self.manager_selected_set()
+            detail = self.get_ui_text("Select a dataset", "Datensatz auswaehlen") if selected_set is None else selected_set
+            self.draw_manager_message(detail, self.manager_detail_rect.top + 20, self.manager_detail_rect)
+            if selected_set:
+                row_count = len(self.read_full_set(selected_set)[0])
+                self.draw_manager_message(self.get_ui_text(f"{row_count} vocabulary rows", f"{row_count} Vokabelzeilen"), self.manager_detail_rect.top + 58, self.manager_detail_rect)
+            self.draw_button(self.manager_select_button, False, False, label=self.get_ui_text("Select", "Waehlen"), font=self.gaussian_font, label_color="#FFFFFF")
+            self.draw_button(self.manager_edit_button, False, False, label=self.get_ui_text("Edit", "Bearbeiten"), font=self.gaussian_font, label_color="#FFFFFF")
+            self.draw_button(self.manager_create_button, False, False, label=self.get_ui_text("Create", "Erstellen"), font=self.gaussian_font, label_color="#FFFFFF")
+            self.draw_button(self.manager_delete_button, False, False, label=self.get_ui_text("Delete", "Loeschen"), font=self.gaussian_font, label_color="#FFFFFF")
+            self.draw_button(self.manager_back_button, False, False, label=self.get_ui_text("Back", "Zurueck"), font=self.gaussian_font, label_color="#FFFFFF")
+        else:
+            self.draw_manager_editor()
+
+        if self.manager_message:
+            self.draw_manager_message(self.manager_message, self.manager_rect.bottom - 54)
+
+    def draw_manager_message(self, text, y, bounds=None):
+        surface = self.gaussian_font.render(text, True, self.TEXT)
+        rect = surface.get_rect(center=(self.manager_rect.centerx if bounds is None else bounds.centerx, y))
+        self.screen.blit(surface, rect)
+
+    def draw_manager_editor(self):
+        selected_set = self.manager_selected_set() or ""
+        header = self.gaussian_font.render(self.get_ui_text(f"Editing: {selected_set}", f"Bearbeiten: {selected_set}"), True, self.BLUE)
+        self.screen.blit(header, (self.manager_detail_rect.left, self.manager_detail_rect.top))
+        pygame.draw.rect(self.screen, self.GRID_COLOR, self.manager_table_rect, width=1)
+        column_x = self.manager_table_rect.left + 36
+        source_header = self.gaussian_font.render(self.get_ui_text("Source", "Quelle"), True, self.TEXT)
+        target_header = self.gaussian_font.render(self.get_ui_text("Target", "Ziel"), True, self.TEXT)
+        self.screen.blit(source_header, (column_x, self.manager_table_rect.top - 22))
+        self.screen.blit(target_header, (self.manager_table_rect.centerx + 6, self.manager_table_rect.top - 22))
+        for screen_row, row_index in enumerate(range(self.manager_scroll, min(len(self.manager_rows), self.manager_scroll + self.manager_visible_rows()))):
+            row_rect = pygame.Rect(self.manager_table_rect.left, self.manager_table_rect.top + screen_row * self.manager_row_height, self.manager_table_rect.width, self.manager_row_height)
+            pygame.draw.line(self.screen, self.GRID_COLOR, row_rect.bottomleft, row_rect.bottomright)
+            pygame.draw.line(self.screen, self.GRID_COLOR, (self.manager_table_rect.centerx, row_rect.top), (self.manager_table_rect.centerx, row_rect.bottom))
+            index_surface = self.gaussian_font.render(str(row_index), True, self.BLUE)
+            self.screen.blit(index_surface, index_surface.get_rect(midleft=(row_rect.left + 5, row_rect.centery)))
+            for column, x in ((0, column_x), (1, self.manager_table_rect.centerx + 6)):
+                value = self.manager_input if (row_index == self.manager_edit_row and column == self.manager_edit_column) else self.manager_rows[row_index][column]
+                value_surface = self.gaussian_font.render(f"{value}_" if row_index == self.manager_edit_row and column == self.manager_edit_column else value, True, self.TEXT)
+                self.screen.blit(value_surface, value_surface.get_rect(midleft=(x, row_rect.centery)))
+        self.draw_button(self.manager_add_button, False, False, label=self.get_ui_text("Add row", "Zeile hinzufuegen"), font=self.gaussian_font, label_color="#FFFFFF")
+        self.draw_button(self.manager_back_button, False, False, label=self.get_ui_text("Back", "Zurueck"), font=self.gaussian_font, label_color="#FFFFFF")
 
     def delete_last_dp(self):
         tmp = pd.read_csv("data/feature_data.csv")
