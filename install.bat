@@ -36,25 +36,12 @@ powershell -Command "Invoke-WebRequest -Uri %BASE%/img/start_button.png     -Out
 
 
 :: ---------------------------------
-:: Ask user for set name
+:: Download all available sets
 :: ---------------------------------
 echo.
-echo Enter set name (e.g. template). Leave empty to use template.
-echo.
-set /p SET_NAME=Set name: 
-if "%SET_NAME%"=="" set SET_NAME=template
-
-:: ---------------------------------
-:: Download selected set files
-:: ---------------------------------
-echo Installing set: %SET_NAME%...
-
-if not exist "sets\%SET_NAME%" mkdir sets\%SET_NAME%
-
-powershell -Command "Invoke-WebRequest -Uri %BASE%/sets/%SET_NAME%/language1.csv -OutFile sets\%SET_NAME%\language1.csv -ErrorAction SilentlyContinue"
-powershell -Command "Invoke-WebRequest -Uri %BASE%/sets/%SET_NAME%/language2.csv -OutFile sets\%SET_NAME%\language2.csv -ErrorAction SilentlyContinue"
-
-echo Set installed (if it exists on GitHub).
+echo Downloading available datasets...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $base='%BASE%'; $sets=Invoke-RestMethod -Uri 'https://api.github.com/repos/Minuicee/Project_20/contents/sets?ref=main'; foreach ($set in $sets | Where-Object { $_.type -eq 'dir' }) { $path=Join-Path 'sets' $set.name; New-Item -ItemType Directory -Force -Path $path | Out-Null; Invoke-WebRequest -Uri ($base + '/sets/' + $set.name + '/language1.csv') -OutFile (Join-Path $path 'language1.csv'); Invoke-WebRequest -Uri ($base + '/sets/' + $set.name + '/language2.csv') -OutFile (Join-Path $path 'language2.csv'); Write-Host ('Installed set: ' + $set.name) }"
+if errorlevel 1 (echo Failed to download datasets. & pause & exit /b)
 
 :: ---------------------------------
 :: Check Python installation

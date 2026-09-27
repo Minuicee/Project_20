@@ -17,18 +17,8 @@ from datetime import datetime
 # TODO make ai local
 # TODO data for reverse translation
 # TODO learning readiness / use data to predict learn span
-# TODO recency factor bis 3 wörter 100% exploration
 # TODO mixed translation probability by avrg certainty
 
-# TODO adjust size of text based on word size
-# TODO datensatz editor
-# TODO arrows for word cap
-# TODO resize window scale
-# TODO pause timer -> mouse movement/keybinding
-
-# TODO install all datasets
-# TODO windows mixerd translation icon
-# TODO slider very high
 
 # parameters for dev
     #print
@@ -82,7 +72,7 @@ exploration_factor_min = 0.5
 exploration_factor_max = 1.5
 slider_snap_sensitivity = 0.05
 focused_area = std_focused_area # cant be bigger than word_cap and n_words
-ignore_characters = " \x08'/(),-;?!\"\n.…"
+ignore_characters = " \x08'/(),-;¿?!\"\n.…"
 feature_columns = [
     "occurrences_session",
     "last_seen",
@@ -200,7 +190,7 @@ class SRS:
         self.ui_language_index = 0
         self.ui_language = self.ui_languages[self.ui_language_index]
         self.translation_mode = 0  # 0=normal (l1->l2), 1=mixed, 2=reverse (l2->l1)
-        self.translation_mode_labels = ("→", "⇄", "←")
+        self.translation_mode_labels = ("->", "<->", "<-")
         self.manager_mode = None
         self.manager_sets = []
         self.manager_selected = 0
@@ -211,6 +201,9 @@ class SRS:
         self.manager_rows = []
         self.manager_drag_row = None
         self.manager_message = ""
+        self.manager_return_to_settings = False
+        self.manager_input_changed = False
+        self.manager_last_dataset_click = None
 
         # --- Gaussian/Weights ---
         self.get_new_gaussian = False
@@ -338,7 +331,33 @@ class SRS:
     def manager_selected_set(self):
         return self.manager_sets[self.manager_selected] if self.manager_sets else None
 
+    def select_manager_dataset(self):
+        selected_set = self.manager_selected_set()
+        if selected_set is None:
+            return
+        try:
+            self.select_set(selected_set)
+            self.manager_message = self.get_ui_text("Dataset selected", "Datensatz ausgewaehlt")
+        except ValueError as error:
+            self.manager_message = str(error)
+
+    def is_manager_dataset_double_click(self, row, event):
+        now = pygame.time.get_ticks()
+        previous_click = self.manager_last_dataset_click
+        event_clicks = getattr(event, "clicks", 1)
+        is_double_click = (
+            event_clicks >= 2
+            or (
+                previous_click is not None
+                and previous_click[0] == row
+                and now - previous_click[1] <= 400
+            )
+        )
+        self.manager_last_dataset_click = None if is_double_click else (row, now)
+        return is_double_click
+
     def open_manager(self):
+        self.manager_return_to_settings = self.settings_clicked
         self.settings_clicked = False
         self.editing_step = 0
         self.trigger_pause()
@@ -350,7 +369,11 @@ class SRS:
         self.manager_mode = None
         self.manager_input = ""
         self.manager_edit_row = None
+        self.manager_edit_column = None
         self.manager_drag_row = None
+        self.manager_input_changed = False
+        self.settings_clicked = self.manager_return_to_settings
+        self.manager_return_to_settings = False
         self.trigger_pause()
 
     def open_manager_editor(self):
@@ -367,6 +390,25 @@ class SRS:
         if selected_set is not None:
             self.manager_rows = list(zip(*self.read_full_set(selected_set)[:2]))
         self.manager_scroll = min(self.manager_scroll, max(0, len(self.manager_rows) - self.manager_visible_rows()))
+
+    def commit_manager_cell(self):
+        if (
+            self.manager_edit_row is None
+            or self.manager_edit_column is None
+            or not self.manager_input_changed
+        ):
+            return
+        selected_set = self.manager_selected_set()
+        self.update_full_set_cell(
+            self.manager_edit_row,
+            self.manager_edit_column,
+            self.manager_input,
+            selected_set,
+        )
+        self.reload_manager_set_if_active(selected_set)
+        self.refresh_manager_rows()
+        self.manager_input = self.manager_rows[self.manager_edit_row][self.manager_edit_column]
+        self.manager_input_changed = False
 
     def reload_manager_set_if_active(self, folder):
         if folder == self.folder:
@@ -389,7 +431,27 @@ class SRS:
         self.manager_edit_row = insert_at
         self.manager_edit_column = 0
         self.manager_input = ""
+        self.manager_input_changed = False
         self.refresh_manager_rows()
+        self.manager_scroll = max(
+            0,
+            min(
+                insert_at - self.manager_visible_rows() + 1,
+                len(self.manager_rows) - self.manager_visible_rows(),
+            ),
+        )
+        self.manager_message = self.get_ui_text("Row added", "Zeile hinzugefuegt")
+
+    def delete_selected_manager_row(self):
+        if self.manager_edit_row is None:
+            self.manager_message = self.get_ui_text(
+                "Select a row to delete",
+                "Zum Loeschen zuerst eine Zeile auswaehlen",
+            )
+            return
+        selected_row = self.manager_edit_row
+        self.commit_manager_cell()
+        self.manager_delete_row(selected_row)
 
     def manager_delete_row(self, row_index):
         selected_set = self.manager_selected_set()
@@ -404,7 +466,11 @@ class SRS:
         self.write_full_set(language1, language2, data.drop(index=row_index).reset_index(drop=True), selected_set)
         self.reload_manager_set_if_active(selected_set)
         self.manager_edit_row = None
+        self.manager_edit_column = None
+        self.manager_input = ""
+        self.manager_input_changed = False
         self.refresh_manager_rows()
+        self.manager_message = self.get_ui_text("Row deleted", "Zeile geloescht")
 
     def manager_move_row(self, source_index, target_index):
         selected_set = self.manager_selected_set()
@@ -421,6 +487,8 @@ class SRS:
         self.reload_manager_set_if_active(selected_set)
         self.manager_edit_row = target_index
         self.refresh_manager_rows()
+        if self.manager_edit_column is not None:
+            self.manager_input = self.manager_rows[target_index][self.manager_edit_column]
 
     def reload_active_set(self):
         global starting_cap, word_cap
@@ -682,9 +750,9 @@ class SRS:
             int(1.9 * window_scale),
         )
         self.manager_rect = pygame.Rect(int(0.4 * window_scale), int(0.25 * window_scale), self.WIDTH - int(0.8 * window_scale), self.HEIGHT - int(0.5 * window_scale))
-        self.manager_list_rect = pygame.Rect(self.manager_rect.left + 20, self.manager_rect.top + 70, self.manager_rect.width // 3 - 30, self.manager_rect.height - 145)
+        self.manager_list_rect = pygame.Rect(self.manager_rect.left + 20, self.manager_rect.top + 100, self.manager_rect.width // 3 - 30, self.manager_rect.height - 175)
         self.manager_detail_rect = pygame.Rect(self.manager_list_rect.right + 20, self.manager_list_rect.top, self.manager_rect.right - self.manager_list_rect.right - 40, self.manager_list_rect.height)
-        self.manager_table_rect = pygame.Rect(self.manager_detail_rect.left, self.manager_detail_rect.top + 42, self.manager_detail_rect.width, self.manager_detail_rect.height - 42)
+        self.manager_table_rect = pygame.Rect(self.manager_detail_rect.left, self.manager_detail_rect.top + 70, self.manager_detail_rect.width, self.manager_detail_rect.height - 70)
         self.manager_row_height = max(28, int(0.17 * window_scale))
         button_width = int(0.62 * window_scale)
         button_height = int(0.23 * window_scale)
@@ -694,7 +762,13 @@ class SRS:
         self.manager_create_button = pygame.Rect(self.manager_edit_button.right + 10, button_y, button_width, button_height)
         self.manager_delete_button = pygame.Rect(self.manager_create_button.right + 10, button_y, button_width, button_height)
         self.manager_back_button = pygame.Rect(self.manager_rect.right - button_width - 20, button_y, button_width, button_height)
-        self.manager_add_button = pygame.Rect(self.manager_table_rect.right - button_width, self.manager_table_rect.top - 36, button_width, button_height)
+        self.manager_add_button = pygame.Rect(self.manager_table_rect.right - button_width, self.manager_detail_rect.top - 6, button_width, button_height)
+        self.manager_delete_row_button = pygame.Rect(
+            self.manager_add_button.left - button_width - 10,
+            self.manager_add_button.top,
+            button_width,
+            button_height,
+        )
 
         # colors
         self.DARK = "#0D0E29"
@@ -725,6 +799,8 @@ class SRS:
         self.tooltip_delay_ms = 500
         self.tooltip_timer = 0
         self.tooltip_mouse_pos = None
+        self.last_mouse_pos = None
+        self.mouse_pause_anchor = None
         self.tooltip_stationary_ms = 0
         self.coordinate_system_line_thickness = 2
         self.button_tooltips = {
@@ -779,6 +855,7 @@ class SRS:
         found_keydown = False
 
         mouse_pos = pygame.mouse.get_pos()
+        mouse_moved = self.handle_mouse_movement(mouse_pos)
         if mouse_pos == self.tooltip_mouse_pos:
             self.tooltip_stationary_ms += self.clock.get_time()
         else:
@@ -820,6 +897,10 @@ class SRS:
 
                 if self.timer_running:
                     continue
+
+                if self.settings_clicked and not self.ctrl_hold:
+                    if self.handle_word_cap_key(event.key):
+                        continue
 
                 if event.key == pygame.K_LCTRL:
                     self.ctrl_hold = True
@@ -1014,13 +1095,69 @@ class SRS:
         if self.word_cap_slider_active:
             self.update_word_cap_slider(pygame.mouse.get_pos()[0])
             
-        if not found_keydown and not self.editing_step:
+        if not found_keydown and not mouse_moved and not self.editing_step:
             self.inactive_ticks += 1
         if self.inactive_ticks > max_inactive_ticks and not self.pause_triggered:
             self.trigger_pause()
 
+    def handle_mouse_movement(self, mouse_pos):
+        mouse_moved = self.last_mouse_pos is not None and mouse_pos != self.last_mouse_pos
+        self.last_mouse_pos = mouse_pos
+        if mouse_moved:
+            self.inactive_ticks = 0
+        if self.mouse_pause_anchor is None:
+            self.mouse_pause_anchor = mouse_pos
+            return mouse_moved
+
+        can_pause = (
+            not self.settings_clicked
+            and self.manager_mode is None
+            and not self.editing_step
+            and not self.timer_running
+            and not self.pause_triggered
+        )
+        if not can_pause:
+            self.mouse_pause_anchor = mouse_pos
+            return mouse_moved
+
+        movement_x = mouse_pos[0] - self.mouse_pause_anchor[0]
+        movement_y = mouse_pos[1] - self.mouse_pause_anchor[1]
+        pause_movement_threshold = max(1, int(0.06 * window_scale))
+        if movement_x * movement_x + movement_y * movement_y >= pause_movement_threshold ** 2:
+            self.mouse_pause_anchor = mouse_pos
+            self.trigger_pause()
+        return mouse_moved
+
     def trigger_folder_button(self):
         self.open_manager()
+
+    def handle_word_cap_key(self, key):
+        increment_keys = (pygame.K_UP, pygame.K_LEFT, pygame.K_w, pygame.K_d)
+        decrement_keys = (pygame.K_DOWN, pygame.K_RIGHT, pygame.K_a, pygame.K_s)
+        if self.starting_cap_slider_hover and key in increment_keys + decrement_keys:
+            self.adjust_starting_cap(1 if key in increment_keys else -1)
+            return True
+        if self.word_cap_slider_hover and key in increment_keys + decrement_keys:
+            self.adjust_word_cap(1 if key in increment_keys else -1)
+            return True
+        return False
+
+    def adjust_starting_cap(self, amount):
+        global starting_cap
+        maximum = max(0, (word_cap if word_cap > 0 else self.total_words - 1) - 2)
+        starting_cap = max(0, min(maximum, starting_cap + amount))
+        self.save_set_config_value("starting_cap.csv", starting_cap)
+        self.apply_word_caps()
+
+    def adjust_word_cap(self, amount):
+        global word_cap
+        maximum = self.total_words - 1
+        current = word_cap if word_cap > 0 else maximum
+        word_cap = max(starting_cap + 2, min(maximum, current + amount))
+        if word_cap == maximum:
+            word_cap = 0
+        self.save_set_config_value("word_cap.csv", word_cap)
+        self.apply_word_caps()
 
     def manager_row_at(self, mouse_pos):
         if not self.manager_table_rect.collidepoint(mouse_pos):
@@ -1036,10 +1173,14 @@ class SRS:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 if self.manager_edit_row is not None:
+                    self.commit_manager_cell()
                     self.manager_edit_row = None
+                    self.manager_edit_column = None
                     self.manager_input = ""
+                    self.manager_input_changed = False
                 elif self.manager_mode == "editor":
                     self.manager_mode = "sets"
+                    self.manager_message = ""
                 elif self.manager_mode in ("create", "confirm_delete"):
                     self.manager_mode = "sets"
                     self.manager_message = ""
@@ -1081,37 +1222,52 @@ class SRS:
                 elif event.key == pygame.K_RETURN:
                     selected_set = self.manager_selected_set()
                     if selected_set:
-                        try:
-                            self.select_set(selected_set)
-                            self.manager_message = self.get_ui_text("Dataset selected", "Datensatz ausgewaehlt")
-                        except ValueError as error:
-                            self.manager_message = str(error)
+                        self.select_manager_dataset()
                 return
             if self.manager_mode == "editor":
+                if event.key == pygame.K_DELETE and self.manager_edit_row is not None:
+                    self.manager_delete_row(self.manager_edit_row)
+                    return
                 if self.manager_edit_row is not None:
                     if event.key == pygame.K_RETURN:
-                        selected_set = self.manager_selected_set()
-                        self.update_full_set_cell(self.manager_edit_row, self.manager_edit_column, self.manager_input, selected_set)
-                        self.reload_manager_set_if_active(selected_set)
+                        self.commit_manager_cell()
                         self.manager_edit_row = None
+                        self.manager_edit_column = None
                         self.manager_input = ""
-                        self.refresh_manager_rows()
+                        self.manager_input_changed = False
                     elif event.key == pygame.K_BACKSPACE:
-                        self.manager_input = self.manager_input[:-1]
+                        if event.mod & pygame.KMOD_CTRL:
+                            parts = self.manager_input.rstrip().rsplit(None, 1)
+                            self.manager_input = parts[0] if len(parts) > 1 else ""
+                        else:
+                            self.manager_input = self.manager_input[:-1]
+                        self.manager_input_changed = True
+                    elif event.mod & pygame.KMOD_CTRL and event.key == pygame.K_a:
+                        self.manager_input = ""
+                        self.manager_input_changed = True
                     elif event.unicode and event.unicode.isprintable():
                         self.manager_input += event.unicode
+                        self.manager_input_changed = True
                 elif event.key == pygame.K_UP:
                     self.manager_scroll = max(0, self.manager_scroll - 1)
                 elif event.key == pygame.K_DOWN:
                     self.manager_scroll = min(max(0, len(self.manager_rows) - self.manager_visible_rows()), self.manager_scroll + 1)
-                elif event.key == pygame.K_DELETE and self.manager_edit_row is not None:
-                    self.manager_delete_row(self.manager_edit_row)
                 return
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.manager_back_button.collidepoint(mouse_pos):
                 if self.manager_mode == "editor":
+                    self.commit_manager_cell()
                     self.manager_mode = "sets"
+                    self.manager_edit_row = None
+                    self.manager_edit_column = None
+                    self.manager_input = ""
+                    self.manager_input_changed = False
+                    self.manager_message = ""
+                elif self.manager_mode in ("confirm_delete", "create"):
+                    self.manager_mode = "sets"
+                    self.manager_message = ""
+                    self.manager_input = ""
                 else:
                     self.close_manager()
                 return
@@ -1120,12 +1276,10 @@ class SRS:
                     row = (mouse_pos[1] - self.manager_list_rect.top) // self.manager_row_height
                     if 0 <= row < len(self.manager_sets):
                         self.manager_selected = row
+                        if self.is_manager_dataset_double_click(row, event):
+                            self.select_manager_dataset()
                 elif self.manager_select_button.collidepoint(mouse_pos) and self.manager_selected_set():
-                    try:
-                        self.select_set(self.manager_selected_set())
-                        self.manager_message = self.get_ui_text("Dataset selected", "Datensatz ausgewaehlt")
-                    except ValueError as error:
-                        self.manager_message = str(error)
+                    self.select_manager_dataset()
                 elif self.manager_edit_button.collidepoint(mouse_pos):
                     self.open_manager_editor()
                 elif self.manager_create_button.collidepoint(mouse_pos):
@@ -1135,26 +1289,33 @@ class SRS:
                     self.manager_mode = "confirm_delete"
                 return
 
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3 and self.manager_mode == "editor":
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and self.manager_mode == "editor":
+            if self.manager_delete_row_button.collidepoint(mouse_pos):
+                self.delete_selected_manager_row()
+                return
+            if self.manager_add_button.collidepoint(mouse_pos):
+                self.commit_manager_cell()
+                self.manager_edit_row = None
+                self.manager_edit_column = None
+                self.manager_input = ""
+                self.manager_input_changed = False
+                self.manager_add_row()
+                return
             row = self.manager_row_at(mouse_pos)
             if row is not None:
-                self.manager_delete_row(row)
-            if self.manager_mode == "editor":
-                if self.manager_add_button.collidepoint(mouse_pos):
-                    self.manager_add_row()
-                    return
-                row = self.manager_row_at(mouse_pos)
-                if row is not None:
-                    column = 0 if mouse_pos[0] < self.manager_table_rect.centerx else 1
-                    self.manager_edit_row = row
-                    self.manager_edit_column = column
-                    self.manager_input = self.manager_rows[row][column]
-                    self.manager_drag_row = row
+                self.commit_manager_cell()
+                self.manager_edit_row = row
+                self.manager_edit_column = 0 if mouse_pos[0] < self.manager_table_rect.centerx else 1
+                self.manager_input = self.manager_rows[row][self.manager_edit_column]
+                self.manager_input_changed = False
+                self.manager_drag_row = row
+                self.manager_message = ""
                 return
 
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.manager_mode == "editor":
             target_row = self.manager_row_at(mouse_pos)
             if self.manager_drag_row is not None and target_row is not None and target_row != self.manager_drag_row:
+                self.commit_manager_cell()
                 self.manager_move_row(self.manager_drag_row, target_row)
             self.manager_drag_row = None
 
@@ -1550,31 +1711,37 @@ class SRS:
 
         # get new index
         if not self.ignore_ai:
-
             selection_weights = self.gauss_distribution() if self.use_gaussian else np.ones(self.n_words)
             explored_mask = self.df.iloc[:, 3] != 0
-
+            eligible_mask = np.ones(self.n_words, dtype=bool)
+            if 0 <= self.last_index < self.n_words:
+                eligible_mask[self.last_index] = False
 
             # determine whether to exploit or explore
             if sum(explored_mask) == self.n_words or not self.should_explore():
                 self.exploitation_count += 1
-                self.word_vals = np.random.rand(self.n_words) * selection_weights #! change
-                masked_vals = np.where(explored_mask, self.word_vals, 0.0)
-                self.current_index = self.get_random_from_probability(self.get_probablity(masked_vals))
-
+                candidate_mask = explored_mask.to_numpy() & eligible_mask
             else:
                 self.exploitation_count = 0
-                self.word_vals = np.random.rand(self.n_words) * selection_weights
-                masked_vals = np.where(explored_mask == 0, self.word_vals, 0)
-                self.current_index = self.get_random_from_probability(self.get_probablity(masked_vals))
+                candidate_mask = ~explored_mask.to_numpy() & eligible_mask
+                if not candidate_mask.any():
+                    candidate_mask = eligible_mask
 
-                        
+            self.word_vals = np.random.rand(self.n_words) * selection_weights
+            masked_vals = np.where(candidate_mask, self.word_vals, 0.0)
+            if masked_vals.sum() <= 0:
+                masked_vals = candidate_mask.astype(float)
+            self.current_index = self.get_random_from_probability(self.get_probablity(masked_vals))
+
             if self.pause_triggered:
                 self.exploitation_count = exploitation_count_before_pause
 
         else:
             #mode to just loop through all words
-            self.current_index = self.index % self.n_words # ignore ai and go through words in order
+            next_index = self.index % self.n_words
+            if next_index == self.last_index:
+                next_index = (next_index + 1) % self.n_words
+            self.current_index = next_index
         self.new_index_time = time.time()
         self.check_typing_start = True
 
@@ -1610,7 +1777,11 @@ class SRS:
         filtered = self.df.iloc[:, 4][self.df.iloc[:, 4] != 0]
         avrg_certainty = 0.5 + np.mean(filtered) if len(filtered) > 0 else 1 # use average of all saved accuracies
 
-        exploration_chance = ((A/(n_explored+B)) + C) * (current_certainty ** D) * (avrg_certainty ** D) * self.exploration_factor * (E ** self.exploitation_count)
+        exploration_chance = (
+            1.0
+            if n_explored < 3
+            else ((A/(n_explored+B)) + C) * (current_certainty ** D) * (avrg_certainty ** D) * self.exploration_factor * (E ** self.exploitation_count)
+        )
         return_val = True if np.random.random() < exploration_chance else False # generate a number to see whether to explore
 
         if print_exploration_chance:
@@ -1659,6 +1830,14 @@ class SRS:
                 else:
                     display_word = self.source[self.current_index]
             word_surface = self.font_word.render(display_word, True, self.TEXT)
+            if word_surface.get_width() > self.WIDTH:
+                font_size = max(1, int(self.font_word.get_height() * self.WIDTH / word_surface.get_width()))
+                fitting_font = pygame.font.SysFont("calibri", font_size)
+                word_surface = fitting_font.render(display_word, True, self.TEXT)
+                while word_surface.get_width() > self.WIDTH and font_size > 1:
+                    font_size -= 1
+                    fitting_font = pygame.font.SysFont("calibri", font_size)
+                    word_surface = fitting_font.render(display_word, True, self.TEXT)
             word_rect = word_surface.get_rect(center=(self.WIDTH // 2, self.HEIGHT *3 // 8))
             self.screen.blit(word_surface, word_rect)
             # text area 
@@ -1760,7 +1939,7 @@ class SRS:
         #* draw sliders
         if self.settings_clicked:
             is_timer_active = self.settings_timer_state in ("running", "paused")
-            timer_label = "            " if is_timer_active else self.get_ui_text("Set timer", "    Timer einstellen")
+            timer_label = "            " if is_timer_active else self.get_ui_text("Set timer", "Timer einstellen")
             self.draw_slider(
                 self.timer_min_slider_rect,
                 min_timer,
@@ -1939,7 +2118,7 @@ class SRS:
         if self.manager_mode == "sets":
             pygame.draw.rect(self.screen, self.GRID_COLOR, self.manager_list_rect, width=1)
             list_title = self.gaussian_font.render(self.get_ui_text("Datasets", "Datensaetze"), True, self.BLUE)
-            self.screen.blit(list_title, (self.manager_list_rect.left, self.manager_list_rect.top - 26))
+            self.screen.blit(list_title, (self.manager_list_rect.left, self.manager_list_rect.top - 28))
             for index, name in enumerate(self.manager_sets):
                 row_rect = pygame.Rect(self.manager_list_rect.left, self.manager_list_rect.top + index * self.manager_row_height, self.manager_list_rect.width, self.manager_row_height)
                 if row_rect.bottom > self.manager_list_rect.bottom:
@@ -1963,33 +2142,72 @@ class SRS:
             self.draw_manager_editor()
 
         if self.manager_message:
-            self.draw_manager_message(self.manager_message, self.manager_rect.bottom - 54)
+            button_y = self.manager_rect.bottom - int(0.23 * window_scale) - 18
+            if self.manager_mode == "editor":
+                message_y = self.manager_rect.bottom - 8 - self.gaussian_font.get_height() // 2
+            else:
+                message_y = button_y - self.gaussian_font.get_height() // 2
+            self.draw_manager_message(self.manager_message, message_y)
 
     def draw_manager_message(self, text, y, bounds=None):
         surface = self.gaussian_font.render(text, True, self.TEXT)
         rect = surface.get_rect(center=(self.manager_rect.centerx if bounds is None else bounds.centerx, y))
         self.screen.blit(surface, rect)
 
+    def fit_manager_text(self, text, max_width, keep_end=False):
+        if self.gaussian_font.size(text)[0] <= max_width:
+            return text
+        ellipsis = "..."
+        if self.gaussian_font.size(ellipsis)[0] > max_width:
+            return ""
+        low, high = 0, len(text)
+        while low < high:
+            middle = (low + high + 1) // 2
+            candidate = ellipsis + text[-middle:] if keep_end and middle else text[:middle] + ellipsis
+            if self.gaussian_font.size(candidate)[0] <= max_width:
+                low = middle
+            else:
+                high = middle - 1
+        if keep_end:
+            return ellipsis + text[-low:] if low else ellipsis
+        return text[:low] + ellipsis
+
     def draw_manager_editor(self):
         selected_set = self.manager_selected_set() or ""
         header = self.gaussian_font.render(self.get_ui_text(f"Editing: {selected_set}", f"Bearbeiten: {selected_set}"), True, self.BLUE)
-        self.screen.blit(header, (self.manager_detail_rect.left, self.manager_detail_rect.top))
+        self.screen.blit(header, (self.manager_detail_rect.left, self.manager_detail_rect.top - 5))
         pygame.draw.rect(self.screen, self.GRID_COLOR, self.manager_table_rect, width=1)
         column_x = self.manager_table_rect.left + 36
+        split_x = self.manager_table_rect.centerx
         source_header = self.gaussian_font.render(self.get_ui_text("Source", "Quelle"), True, self.TEXT)
         target_header = self.gaussian_font.render(self.get_ui_text("Target", "Ziel"), True, self.TEXT)
-        self.screen.blit(source_header, (column_x, self.manager_table_rect.top - 22))
-        self.screen.blit(target_header, (self.manager_table_rect.centerx + 6, self.manager_table_rect.top - 22))
+        self.screen.blit(source_header, (column_x, self.manager_table_rect.top - 21))
+        self.screen.blit(target_header, (split_x + 6, self.manager_table_rect.top - 21))
         for screen_row, row_index in enumerate(range(self.manager_scroll, min(len(self.manager_rows), self.manager_scroll + self.manager_visible_rows()))):
             row_rect = pygame.Rect(self.manager_table_rect.left, self.manager_table_rect.top + screen_row * self.manager_row_height, self.manager_table_rect.width, self.manager_row_height)
             pygame.draw.line(self.screen, self.GRID_COLOR, row_rect.bottomleft, row_rect.bottomright)
-            pygame.draw.line(self.screen, self.GRID_COLOR, (self.manager_table_rect.centerx, row_rect.top), (self.manager_table_rect.centerx, row_rect.bottom))
+            pygame.draw.line(self.screen, self.GRID_COLOR, (split_x, row_rect.top), (split_x, row_rect.bottom))
             index_surface = self.gaussian_font.render(str(row_index), True, self.BLUE)
-            self.screen.blit(index_surface, index_surface.get_rect(midleft=(row_rect.left + 5, row_rect.centery)))
-            for column, x in ((0, column_x), (1, self.manager_table_rect.centerx + 6)):
-                value = self.manager_input if (row_index == self.manager_edit_row and column == self.manager_edit_column) else self.manager_rows[row_index][column]
-                value_surface = self.gaussian_font.render(f"{value}_" if row_index == self.manager_edit_row and column == self.manager_edit_column else value, True, self.TEXT)
-                self.screen.blit(value_surface, value_surface.get_rect(midleft=(x, row_rect.centery)))
+            self.screen.blit(index_surface, index_surface.get_rect(midleft=(row_rect.left + 5, row_rect.centery + 3)))
+            for column, x, right in ((0, column_x, split_x - 6), (1, split_x + 6, self.manager_table_rect.right - 6)):
+                is_editing = row_index == self.manager_edit_row and column == self.manager_edit_column
+                value = self.manager_input if is_editing else self.manager_rows[row_index][column]
+                if is_editing:
+                    value += "_"
+                value = self.fit_manager_text(value, right - x, keep_end=is_editing)
+                value_surface = self.gaussian_font.render(value, True, self.TEXT)
+                old_clip = self.screen.get_clip()
+                self.screen.set_clip(pygame.Rect(x, row_rect.top, right - x, row_rect.height).clip(old_clip))
+                self.screen.blit(value_surface, value_surface.get_rect(midleft=(x, row_rect.centery + 3)))
+                self.screen.set_clip(old_clip)
+        self.draw_button(
+            self.manager_delete_row_button,
+            False,
+            False,
+            label=self.get_ui_text("Delete row", "Zeile loeschen"),
+            font=self.gaussian_font,
+            label_color="#FFFFFF",
+        )
         self.draw_button(self.manager_add_button, False, False, label=self.get_ui_text("Add row", "Zeile hinzufuegen"), font=self.gaussian_font, label_color="#FFFFFF")
         self.draw_button(self.manager_back_button, False, False, label=self.get_ui_text("Back", "Zurueck"), font=self.gaussian_font, label_color="#FFFFFF")
 
@@ -2164,7 +2382,13 @@ class SRS:
             exploration_factor_min,
             exploration_factor_max,
             self.get_ui_text("Exploration", "Erkundung"),
-            ["very low", "low", "normal", "high", "very high"],
+            [
+                self.get_ui_text("very low", "sehr niedrig"),
+                self.get_ui_text("low", "niedrig"),
+                self.get_ui_text("normal", "normal"),
+                self.get_ui_text("high", "hoch"),
+                self.get_ui_text("very high", "sehr hoch"),
+            ],
             [0.5, 0.75, 1.0, 1.25, 1.5],
             align_left=True,
             label_offset=int(0.07 * window_scale),
@@ -2177,7 +2401,13 @@ class SRS:
             len_timer_min,
             len_timer_max,
             self.get_ui_text("Timer", "Antwortzeit"),
-            ["very fast", "fast", "normal", "slow", "very slow"],
+            [
+                self.get_ui_text("very fast", "sehr schnell"),
+                self.get_ui_text("fast", "schnell"),
+                self.get_ui_text("normal", "normal"),
+                self.get_ui_text("slow", "langsam"),
+                self.get_ui_text("very slow", "sehr langsam"),
+            ],
             [0, 22.5, 45, 67.5, 90],
             align_left=True,
             label_offset=int(0.07 * window_scale),
@@ -2361,7 +2591,10 @@ class SRS:
 
     def init_df_tensor(self):
         data_path = f"sets/{self.folder}/data.csv"
-        df = pd.read_csv(data_path, header=0)
+        try:
+            df = pd.read_csv(data_path, header=0)
+        except (FileNotFoundError, pd.errors.EmptyDataError):
+            df = pd.DataFrame(columns=feature_columns)
         last_word_index = word_cap if word_cap > 0 else self.total_words - 1
         if len(df) == self.n_words and self.n_words != self.total_words:
             full_df = pd.DataFrame(0.0, index=range(self.total_words), columns=feature_columns)

@@ -34,6 +34,13 @@ if not exist "main.py" (
 )
 
 :: -------------------------------
+:: Download new datasets
+:: -------------------------------
+echo Checking for new datasets...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $base='%BASE%'; $sets=Invoke-RestMethod -Uri 'https://api.github.com/repos/Minuicee/Project_20/contents/sets?ref=main'; foreach ($set in $sets | Where-Object { $_.type -eq 'dir' }) { $path=Join-Path 'sets' $set.name; if (-not (Test-Path $path)) { New-Item -ItemType Directory -Force -Path $path | Out-Null; Invoke-WebRequest -Uri ($base + '/sets/' + $set.name + '/language1.csv') -OutFile (Join-Path $path 'language1.csv'); Invoke-WebRequest -Uri ($base + '/sets/' + $set.name + '/language2.csv') -OutFile (Join-Path $path 'language2.csv'); Write-Host ('Downloaded new set: ' + $set.name) } }"
+if errorlevel 1 echo Could not check for new datasets. Continuing with installed datasets.
+
+:: -------------------------------
 :: Run without terminal window
 :: -------------------------------
 if exist "venv\Scripts\pythonw.exe" (
