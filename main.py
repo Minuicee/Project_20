@@ -932,7 +932,7 @@ class SRS:
 
     def run(self):
         self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
-        pygame.display.set_caption("SRS")
+        pygame.display.set_caption("flashcards_ai")
 
         while True:
             self.screen.fill(self.BACKGROUND)
@@ -1599,6 +1599,7 @@ class SRS:
 
     def handle_start_button_click(self):
         if self.settings_timer_state == "stopped":
+            pygame.display.set_caption("")
             self.settings_timer_state = "running"
             self.settings_timer_remaining = float(min_timer * 60)
             self.settings_timer_duration = self.settings_timer_remaining
