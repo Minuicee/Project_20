@@ -12,12 +12,12 @@ import os
 import random
 from datetime import datetime
 
-
+#after
 # TODO change gaussian range
-# TODO make ai local
-# TODO data for reverse translation
 # TODO learning readiness / use data to predict learn span
-# TODO mixed translation probability by avrg certainty
+
+#before
+# TODO make ai local
 
 
 # parameters for dev
@@ -73,13 +73,18 @@ exploration_factor_max = 1.5
 slider_snap_sensitivity = 0.05
 focused_area = std_focused_area # cant be bigger than word_cap and n_words
 ignore_characters = " \x08'/(),-;¿?!\"\n.…"
+    #dataset manager tab-hold repeat (in milliseconds)
+manager_tab_initial_interval = 400.0
+manager_tab_repeat_decay = 900.0
+manager_tab_fast_interval = 80.0 # once repeats are this fast, skip whole rows instead of alternating source/target
 feature_columns = [
     "occurrences_session",
     "last_seen",
     "last_seen_index",
     "n_reps",
     "EMA_accuracy",
-    "last_correct_score",
+    "last_correct_score_l1",
+    "last_correct_score_l2",
     "correct_streak",
     "current_time",
     "current_index",
@@ -93,7 +98,8 @@ ai_input_columns =  [
     "last_seen_index",
     "n_reps",
     "EMA_accuracy",
-    "last_correct_score",
+    "last_correct_score_l1",
+    "last_correct_score_l2",
     "correct_streak",
     "time_since_start",
     "index_since_start",
@@ -191,6 +197,7 @@ class SRS:
         self.ui_language = self.ui_languages[self.ui_language_index]
         self.translation_mode = 0  # 0=normal (l1->l2), 1=mixed, 2=reverse (l2->l1)
         self.translation_mode_labels = ("->", "<->", "<-")
+        self.current_translation_direction = 0  # 0=normal (l1->l2), 1=reverse (l2->l1); tracks direction of the word currently being answered
         self.manager_mode = None
         self.manager_sets = []
         self.manager_selected = 0
@@ -204,6 +211,9 @@ class SRS:
         self.manager_return_to_settings = False
         self.manager_input_changed = False
         self.manager_last_dataset_click = None
+        self.manager_tab_held = False
+        self.manager_tab_hold_time = 0.0
+        self.manager_tab_repeat_timer = 0.0
 
         # --- Gaussian/Weights ---
         self.get_new_gaussian = False
@@ -265,7 +275,7 @@ class SRS:
             data = pd.read_csv(data_path, header=0)
         except (FileNotFoundError, pd.errors.EmptyDataError):
             data = pd.DataFrame(columns=feature_columns)
-        data = data.reindex(columns=feature_columns, fill_value=0.0)
+        data = self.migrate_legacy_columns(data)
         data = data.apply(pd.to_numeric, errors="coerce").fillna(0.0)
         if len(data) < len(language1):
             missing = pd.DataFrame(0.0, index=range(len(language1) - len(data)), columns=feature_columns)
@@ -414,8 +424,94 @@ class SRS:
         if folder == self.folder:
             self.reload_active_set()
 
-    def manager_visible_rows(self):
+    def manager_visible_rows(self): 
         return max(1, self.manager_table_rect.height // self.manager_row_height)
+
+    def manager_scroll_to_row(self, row_index):
+        visible_rows = self.manager_visible_rows()
+        if row_index < self.manager_scroll:
+            self.manager_scroll = row_index
+        elif row_index >= self.manager_scroll + visible_rows:
+            self.manager_scroll = row_index - visible_rows + 1
+
+    def update_manager_tab_hold(self):
+        frame_time = self.clock.get_time()
+        self.manager_tab_hold_time += frame_time
+        self.manager_tab_repeat_timer += frame_time
+        interval = self.get_manager_tab_repeat_interval(self.manager_tab_hold_time)
+        if self.manager_tab_repeat_timer < interval:
+            return
+        self.manager_tab_repeat_timer = 0.0
+        keys = pygame.key.get_pressed()
+        direction = -1 if (keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]) else 1
+        skip_row = interval <= manager_tab_fast_interval
+        self.manager_tab_advance(direction, skip_row=skip_row, allow_create=False)
+
+    def get_manager_tab_repeat_interval(self, hold_time):
+        # repeats start slow and accelerate the longer tab is held, with no lower limit (frame rate is the only cap)
+        return manager_tab_initial_interval * math.exp(-hold_time / manager_tab_repeat_decay)
+
+    def manager_tab_advance(self, direction, skip_row=False, allow_create=True):
+        if self.manager_edit_row is None:
+            return
+        self.commit_manager_cell()
+        if skip_row:
+            self.manager_tab_skip_row(direction, allow_create)
+        else:
+            self.manager_tab_step(direction, allow_create)
+
+    def manager_tab_step(self, direction, allow_create=True):
+        # alternates source -> target -> next/previous row's source/target
+        if self.manager_edit_row is None:
+            return
+        if direction > 0:
+            if self.manager_edit_column == 0:
+                self.manager_edit_column = 1
+                self.manager_input = self.manager_rows[self.manager_edit_row][1]
+                self.manager_input_changed = False
+                self.manager_scroll_to_row(self.manager_edit_row)
+            else:
+                next_row = self.manager_edit_row + 1
+                if next_row >= len(self.manager_rows):
+                    if allow_create:
+                        self.manager_add_row()
+                else:
+                    self.manager_edit_row = next_row
+                    self.manager_edit_column = 0
+                    self.manager_input = self.manager_rows[next_row][0]
+                    self.manager_input_changed = False
+                    self.manager_scroll_to_row(next_row)
+        else:
+            if self.manager_edit_column == 1:
+                self.manager_edit_column = 0
+                self.manager_input = self.manager_rows[self.manager_edit_row][0]
+                self.manager_input_changed = False
+                self.manager_scroll_to_row(self.manager_edit_row)
+            else:
+                prev_row = self.manager_edit_row - 1
+                if prev_row < 0:
+                    return
+                self.manager_edit_row = prev_row
+                self.manager_edit_column = 1
+                self.manager_input = self.manager_rows[prev_row][1]
+                self.manager_input_changed = False
+                self.manager_scroll_to_row(prev_row)
+
+    def manager_tab_skip_row(self, direction, allow_create=True):
+        # once repeating fast, jump whole rows in the current column instead of alternating source/target
+        if self.manager_edit_row is None:
+            return
+        next_row = self.manager_edit_row + direction
+        if next_row < 0:
+            return
+        if next_row >= len(self.manager_rows):
+            if direction > 0 and allow_create:
+                self.manager_add_row()
+            return
+        self.manager_edit_row = next_row
+        self.manager_input = self.manager_rows[next_row][self.manager_edit_column]
+        self.manager_input_changed = False
+        self.manager_scroll_to_row(next_row)
 
     def manager_add_row(self):
         selected_set = self.manager_selected_set()
@@ -1094,7 +1190,10 @@ class SRS:
 
         if self.word_cap_slider_active:
             self.update_word_cap_slider(pygame.mouse.get_pos()[0])
-            
+
+        if self.manager_tab_held and self.manager_mode == "editor" and self.manager_edit_row is not None:
+            self.update_manager_tab_hold()
+
         if not found_keydown and not mouse_moved and not self.editing_step:
             self.inactive_ticks += 1
         if self.inactive_ticks > max_inactive_ticks and not self.pause_triggered:
@@ -1170,6 +1269,12 @@ class SRS:
             self.manager_scroll = max(0, min(max(0, len(self.manager_rows) - self.manager_visible_rows()), self.manager_scroll - event.y))
             return
 
+        if event.type == pygame.KEYUP and event.key == pygame.K_TAB:
+            self.manager_tab_held = False
+            self.manager_tab_hold_time = 0.0
+            self.manager_tab_repeat_timer = 0.0
+            return
+
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 if self.manager_edit_row is not None:
@@ -1235,6 +1340,12 @@ class SRS:
                         self.manager_edit_column = None
                         self.manager_input = ""
                         self.manager_input_changed = False
+                    elif event.key == pygame.K_TAB:
+                        direction = -1 if event.mod & pygame.KMOD_SHIFT else 1
+                        self.manager_tab_advance(direction)
+                        self.manager_tab_held = True
+                        self.manager_tab_hold_time = 0.0
+                        self.manager_tab_repeat_timer = 0.0
                     elif event.key == pygame.K_BACKSPACE:
                         if event.mod & pygame.KMOD_CTRL:
                             parts = self.manager_input.rstrip().rsplit(None, 1)
@@ -1334,9 +1445,11 @@ class SRS:
         if self.translation_mode == 0:  # normal: l1 -> l2
             self.source = self.l1
             self.target = self.l2
+            self.current_translation_direction = 0
         elif self.translation_mode == 2:  # reverse: l2 -> l1
             self.source = self.l2
             self.target = self.l1
+            self.current_translation_direction = 1
         # mode 1 (mixed) is handled per-word in get_new_index
 
     def trigger_settings_button(self):
@@ -1561,7 +1674,7 @@ class SRS:
             #get new word data
             time_now = time.time()
             time_now_scaled = self.scale_time(time_now)
-            time_since_last_seen = time_now_scaled - word_data.iloc[7]
+            time_since_last_seen = time_now_scaled - word_data.iloc[8]
 
             correct_score = self.account_typing_start_time(correct, (self.typing_start - self.new_index_time), self.previous_word_correct)
             old_ema = word_data.iloc[4] if word_data.iloc[4] != 0 else 0.5
@@ -1570,19 +1683,22 @@ class SRS:
             # update session ema
             self.session_ema = self.get_ema(old_ema=self.session_ema, accuracy=correct_score)
 
+            # last correct score is tracked separately per translation direction
+            last_correct_score_col = 5 if self.current_translation_direction == 0 else 6
+
             #save new word_data tensor
             word_data.iloc[0] += 1.0 # occurrences in session (will be reset on new session)
             word_data.iloc[1] = time_since_last_seen # last seen (in hours)
-            word_data.iloc[2] = float(self.index - word_data.iloc[8]) # last seen index
+            word_data.iloc[2] = float(self.index - word_data.iloc[9]) # last seen index
             word_data.iloc[3] += 1.0 # n reps
             word_data.iloc[4] = new_ema # exponentially moving average of accuracy
-            word_data.iloc[5] = correct_score  
-            word_data.iloc[6] = word_data.iloc[6]+1 if correct == 1.0 else 0.0 # correct streak
-            word_data.iloc[7] = time_now_scaled # current time (in hours)
-            word_data.iloc[8] = float(self.index) # current index
-            word_data.iloc[9] = time_now_scaled - self.starting_time # current time since start of session (in hours)
-            word_data.iloc[10] = self.index - self.starting_index # current index since start of session
-            word_data.iloc[11] = self.session_ema
+            word_data.iloc[last_correct_score_col] = correct_score
+            word_data.iloc[7] = word_data.iloc[7]+1 if correct == 1.0 else 0.0 # correct streak
+            word_data.iloc[8] = time_now_scaled # current time (in hours)
+            word_data.iloc[9] = float(self.index) # current index
+            word_data.iloc[10] = time_now_scaled - self.starting_time # current time since start of session (in hours)
+            word_data.iloc[11] = self.index - self.starting_index # current index since start of session
+            word_data.iloc[12] = self.session_ema
         
             if print_data_tensor:
                 self.print_data_tensor(word_data) # print data for debugging
@@ -1606,18 +1722,19 @@ class SRS:
 
     def get_normalized_df(self, df=None, is_training=False):
         df = self.df if df is None else df
-        normalized_df = np.zeros((len(df), 10))
+        normalized_df = np.zeros((len(df), 11))
 
         normalized_df[:, 0] = self.log_and_normalize(df.iloc[:, 0], is_training, 0) # occurrences in session
-        normalized_df[:, 1] = self.log_and_normalize(df.iloc[:, 1] if is_training else self.get_scaled_time() - df.iloc[:, 7], is_training, 1) # time since last seen: either use finished datapoint (for training) or use saved data to make a new one
-        normalized_df[:, 2] = self.log_and_normalize(df.iloc[:, 2] if is_training else self.index - df.iloc[:, 8], is_training, 2) # index since last seen: same as above
+        normalized_df[:, 1] = self.log_and_normalize(df.iloc[:, 1] if is_training else self.get_scaled_time() - df.iloc[:, 8], is_training, 1) # time since last seen: either use finished datapoint (for training) or use saved data to make a new one
+        normalized_df[:, 2] = self.log_and_normalize(df.iloc[:, 2] if is_training else self.index - df.iloc[:, 9], is_training, 2) # index since last seen: same as above
         normalized_df[:, 3] = self.log_and_normalize(df.iloc[:, 3], is_training, 3) # n_reps
         normalized_df[:, 4] = self.normalize(df.iloc[:, 4]) # ema:because accuracy is always between 0 and 1, we can just subtract 0.5 to center it around 0
-        normalized_df[:, 5] = self.normalize(df.iloc[:, 5]) # last correct score: same as above
-        normalized_df[:, 6] = self.log_and_normalize(df.iloc[:, 6], is_training, 6) # correct streak
-        normalized_df[:, 7] = self.log_and_normalize(60*(df.iloc[:, 9] if is_training else self.get_scaled_time() - self.starting_time), is_training, 7) # time since start of session (in minutes)
-        normalized_df[:, 8] = self.log_and_normalize(df.iloc[:, 10] if is_training else self.index - self.starting_index, is_training, 8) # index since start of session
-        normalized_df[:, 9] = self.normalize(df.iloc[:, 11]) # session ema between 0 and 1
+        normalized_df[:, 5] = self.normalize(df.iloc[:, 5]) # last correct score (l1->l2 direction): same as above
+        normalized_df[:, 6] = self.normalize(df.iloc[:, 6]) # last correct score (l2->l1 direction): same as above
+        normalized_df[:, 7] = self.log_and_normalize(df.iloc[:, 7], is_training, 7) # correct streak
+        normalized_df[:, 8] = self.log_and_normalize(60*(df.iloc[:, 10] if is_training else self.get_scaled_time() - self.starting_time), is_training, 8) # time since start of session (in minutes)
+        normalized_df[:, 9] = self.log_and_normalize(df.iloc[:, 11] if is_training else self.index - self.starting_index, is_training, 9) # index since start of session
+        normalized_df[:, 10] = self.normalize(df.iloc[:, 12]) # session ema between 0 and 1
         if print_normalized_df: 
             self.print_normalized_df(normalized_df[self.current_index])
 
@@ -1745,14 +1862,25 @@ class SRS:
         self.new_index_time = time.time()
         self.check_typing_start = True
 
-        # for mixed mode, randomly swap direction per word
+        # for mixed mode, pick direction per word using the same probability mechanism as word selection,
+        # weighted towards the direction with the lower last correct score
         if self.translation_mode == 1:
-            if random.random() < 0.5:
+            direction_weights = self.get_translation_direction_weights()
+            self.current_translation_direction = self.get_random_from_probability(self.get_probablity(direction_weights))
+            if self.current_translation_direction == 0:
                 self.source = self.l1
                 self.target = self.l2
             else:
                 self.source = self.l2
                 self.target = self.l1
+
+    def get_translation_direction_weights(self):
+        # unseen directions (score 0) default to 0.5; lower last correct score -> more likely to be picked
+        # a small floor keeps both directions selectable even after a perfect score
+        last_correct_l1, last_correct_l2 = self.df.iloc[self.current_index, [5, 6]].to_numpy(dtype=float)
+        weight_l1 = max(1.0 - last_correct_l1, 0.05) if last_correct_l1 != 0 else 0.5
+        weight_l2 = max(1.0 - last_correct_l2, 0.05) if last_correct_l2 != 0 else 0.5
+        return np.array([weight_l1, weight_l2])
 
     def get_probablity(self, x):
         weights = np.asarray(x, dtype=float)
@@ -2589,12 +2717,22 @@ class SRS:
         pd.DataFrame(rows).to_csv(f"sets/{self.folder}/data.csv", mode="a", index=False, header=header)
         self.init_df_tensor()
 
+    def migrate_legacy_columns(self, df):
+        # older sets/data.csv files stored a single last_correct_score column; split it into the l1/l2 direction columns
+        if "last_correct_score" in df.columns and "last_correct_score_l1" not in df.columns:
+            df = df.rename(columns={"last_correct_score": "last_correct_score_l1"})
+        return df.reindex(columns=feature_columns, fill_value=0.0)
+
     def init_df_tensor(self):
         data_path = f"sets/{self.folder}/data.csv"
         try:
-            df = pd.read_csv(data_path, header=0)
+            raw_df = pd.read_csv(data_path, header=0)
         except (FileNotFoundError, pd.errors.EmptyDataError):
-            df = pd.DataFrame(columns=feature_columns)
+            raw_df = pd.DataFrame(columns=feature_columns)
+        needs_migration = list(raw_df.columns) != feature_columns
+        df = self.migrate_legacy_columns(raw_df)
+        if needs_migration and len(df) > 0:
+            df.to_csv(data_path, index=False, header=feature_columns)
         last_word_index = word_cap if word_cap > 0 else self.total_words - 1
         if len(df) == self.n_words and self.n_words != self.total_words:
             full_df = pd.DataFrame(0.0, index=range(self.total_words), columns=feature_columns)
@@ -2605,7 +2743,7 @@ class SRS:
         # reset occurrences in session and save as self.df
         self.df = self.set_row_val(df, 0, 0.0)
         # also reset session ema
-        self.df = self.set_row_val(df, 11, 0)
+        self.df = self.set_row_val(df, 12, 0)
 
     def set_row_val(self, df: pd.DataFrame, col, val):
         df.iloc[:, col] = val

@@ -1,6 +1,0 @@
-pandas
-pygame
-torch
-numpy
-matplotlib
-ollama
